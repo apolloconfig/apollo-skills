@@ -3,7 +3,30 @@ name: apollo-pr-review
 description: Review pull requests for Apollo ecosystem repositories (apollo, apollo-java, agollo, etc.) with maintainer-grade rigor. Use when triaging contributor updates, reconciling prior review feedback, validating Copilot/AI comments, checking compatibility/regression risks, and drafting concise publish-ready maintainer replies.
 ---
 
+# Apollo PR Review
+
 Use this skill to run high-signal PR reviews across Apollo community repos with consistent standards and low back-and-forth.
+
+## Input Contract
+
+Collect or derive these fields before review:
+
+- `repo`: `<owner>/<repo>`
+- `pr_number`: numeric ID
+- `head_sha`: latest commit SHA on PR head
+- `pr_context`: files, comments, reviews, checks
+- `publish_mode`: `draft-only` (default) or `send-after-confirm`
+- `output_mode`: `human` (default) or `pipeline`
+
+Optional but recommended handoff from `apollo-issue-to-pr`:
+
+- `goal`
+- `acceptance_criteria`
+- `non_goals`
+- `change_plan`
+- `test_results`
+
+If `pr_number` or `head_sha` cannot be confirmed, ask one short clarification before continuing.
 
 ## Review Workflow
 
@@ -136,14 +159,50 @@ Use concise, neutral wording.
 
 ## Output Contract
 
-When user asks for review, output in this order:
+Default (`output_mode=human`) output should be human-friendly:
 
-1. Findings (P1 -> P3, with file/line evidence)
-2. Open questions/assumptions
-3. Addressed-items summary
-4. Publish-ready maintainer comment draft
-5. Confirmation prompt: ask whether to send and with which action (`comment` / `request changes` / `approve`)
+1. `Review Decision`
+- recommended action (`comment` / `request changes` / `approve` / `merge-ready`)
+- whether it is blocking
+- confidence
 
-If no blocking issues: state explicitly `no blocking findings`, then mention residual risk/testing gap.
+2. `Findings`
+- list findings in severity order `P1 -> P3`
+- include file/line evidence and impact
+- if none, state `no blocking findings`
+
+3. `Contract Check`
+- if issue-to-pr handoff is available, report goal/criteria alignment
+- call out any non-goal violations
+
+4. `Risk and Gate Status`
+- required checks summary
+- residual risks and testing gaps
+- merge preconditions
+
+5. `Publish-ready Maintainer Review Draft`
+- draft body for selected action
+
+6. `Publish Gate`
+- explicit confirmation question before sending
+
+If `output_mode=pipeline`, append one machine-readable block after the human output:
+
+```yaml
+handoff:
+  review_decision:
+    action: "comment|request changes|approve|merge-ready"
+    blocking: false
+    decision_confidence: "high|medium|low"
+  findings: []
+  contract_check:
+    goal_match: "pass|partial|fail|unknown"
+    acceptance_criteria_status: []
+    non_goal_violations: []
+  gate_status:
+    required_checks: []
+    residual_risks: []
+    merge_preconditions: []
+```
 
 Default rule: no GitHub comment/review is sent until user explicitly confirms.

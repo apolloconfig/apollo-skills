@@ -23,6 +23,23 @@ Follow this workflow to review an Apollo issue and produce a concise maintainer 
 - For OpenAPI-related asks, explicitly separate Portal web APIs (e.g., `/users`) and OpenAPI endpoints (e.g., `/openapi/v1/*`); only claim "OpenAPI supports X" when token-based OpenAPI path is verified.
 - Before concluding "capability not available", cross-check code + docs/scripts + module/dependency hints from `pom.xml` to avoid false negatives caused by path assumptions.
 
+## Input Contract
+
+Collect or derive these fields before review:
+
+- `repo`: `<owner>/<repo>`
+- `issue_number`: numeric ID
+- `issue_context`: title/body/comments
+- `publish_mode`: `draft-only` (default) or `post-after-confirm`
+- `output_mode`: `human` (default) or `pipeline`
+
+Optional but recommended:
+
+- `known_labels`: existing labels on the issue
+- `desired_outcome`: whether user wants only triage or triage + implementation handoff
+
+If `issue_number` or `issue_context` is missing, ask one short clarification before continuing.
+
 ## Workflow
 
 1. Collect issue facts and user ask
@@ -123,28 +140,55 @@ curl --http1.1 -sS -X POST \
 - If local proxy is required, add `-x http://127.0.0.1:7897`.
 - After posting, return the comment URL as evidence.
 
-## Output Requirements
+## Output Contract
 
-Every final reply should include:
-- A first sentence that matches issue type:
+Default (`output_mode=human`) output should be human-friendly:
+
+1. `Issue Summary`
+- issue type + confidence
+- validation result (reproduced / not reproduced / evidence result)
+
+2. `Triage Suggestion`
+- labels to add
+- missing information (if any)
+- whether it is ready for implementation handoff
+
+3. `Draft Maintainer Reply`
+- First sentence must match issue type:
   - behavior/regression: reproducibility status (`已复现/暂未复现` or `Reproduced/Not yet reproduced`)
-  - consultative/support: direct availability conclusion (for example `目前没有官方压测脚本`)
-- At least one concrete API/code path/file reference backing the conclusion.
-- If behavior is unsupported today:
-  - explicit statement that current feature is not supported
-  - one actionable workaround available now
-  - one actionable next path (PR guidance or maintainer follow-up)
-- If behavior is reproducible and conclusion is stable: no extra data request.
-- If behavior is not reproducible: only ask for minimal reproducible inputs.
-- If a prior thread comment already covers the same answer, avoid duplicate full restatement; provide only added value (correction, boundary clarification, or missing actionable step).
-- No unverified root-cause claim presented as fact.
-- Avoid irrelevant version/regression statements unless they materially affect action.
-- Language must match the issue's main language unless explicitly requested otherwise.
-- If user has not explicitly confirmed publishing, end with a confirmation question instead of running posting commands.
-- If the thread contains a contribution-claim proposal, include at least:
-  - one encouragement sentence,
-  - one "can reuse" recommendation,
-  - one "should not directly reuse" boundary (when applicable).
+  - consultative/support: direct availability conclusion
+- Include at least one concrete API/code path/file reference.
+- If unsupported today: include support boundary + practical workaround + next path.
+- If reproducible and conclusion is stable: do not request extra data.
+- If not reproducible: request only minimal reproducible inputs.
+- If prior comment already solved the ask: provide concise delta only.
+- Do not present unverified root cause as fact.
+- Keep language matched to issue language unless user asks otherwise.
+
+4. `Publish Gate`
+- If no explicit publish confirmation exists, end with:
+  - Chinese: `是否直接发布到 issue #<id>？回复“发布”或“先不发”。`
+  - English: `Post this to issue #<id> now? Reply "post" or "hold".`
+
+If `output_mode=pipeline`, append one machine-readable block after the human output:
+
+```yaml
+handoff:
+  issue_classification:
+    type: "功能咨询|问题排查|技术讨论|Bug 反馈|Feature request"
+    validation_path: "behavior-regression|consultative-support"
+    confidence: "high|medium|low"
+  triage_decision:
+    labels_to_add: []
+    missing_info_fields: []
+    ready_for_issue_to_pr: false
+    ready_reason: ""
+  implementation_handoff:
+    goal: ""
+    acceptance_criteria: []
+    suggested_modules: []
+    risk_hints: []
+```
 
 ## Load References When Needed
 
