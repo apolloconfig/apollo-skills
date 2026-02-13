@@ -1,4 +1,4 @@
 interface:
   display_name: "Apollo Issue To PR"
   short_description: "Semi-auto issue-to-PR flow for low-risk Apollo changes"
-  default_prompt: "Use $apollo-issue-to-pr to assess this issue and produce a minimal draft PR plan."
+  default_prompt: "Use $apollo-issue-to-pr to assess this issue, plan a minimal implementation, and ensure the PR fully covers in-scope issue scenarios before claiming Fixes."

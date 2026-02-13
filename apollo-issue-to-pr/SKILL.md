@@ -49,11 +49,16 @@ Use this skill for semi-automatic issue-to-PR execution in Apollo repositories.
   - `non-goals`
   - `acceptance checks`
   - `tests to add or update`
+- Build a scenario closure map:
+  - `issue_scenario -> code path(s) -> test(s) -> status`
+  - status must be one of `resolved` / `partially resolved` / `unresolved` / `out of scope`
 - Keep behavior aligned to issue ask; do not add unrelated refactors.
 
 4. Implement minimum viable patch
 - Keep scope small and directly tied to acceptance criteria.
 - Update/add tests for changed behavior.
+- Cover all in-scope issue scenarios, not only the touched diff lines.
+- Check for "same bug class, different entrypoint" gaps when shared validators/config paths are involved.
 - Use branch naming: `codex/issue-<id>-<short-topic>`.
 - If `CHANGES.md` needs an entry, add/update it during implementation.
 - During implementation/review iterations, allow multiple incremental commits.
@@ -69,6 +74,8 @@ Use this skill for semi-automatic issue-to-PR execution in Apollo repositories.
 ```bash
 ./mvnw clean test
 ```
+- Re-evaluate scenario closure map after tests:
+  - any in-scope `partially resolved`/`unresolved` scenario blocks publish.
 - If checks fail, do not open PR.
 
 6. Finalize history once before publish
@@ -84,7 +91,8 @@ Use this skill for semi-automatic issue-to-PR execution in Apollo repositories.
 - Final commit message rules:
   - use Conventional Commits
   - use `type: summary` format (no scope segment)
-  - append `Fixes #<issue-id>` in commit message body
+  - if issue coverage verdict is `full`, append `Fixes #<issue-id>` in commit message body
+  - if issue coverage verdict is `partial`, use `Refs #<issue-id>` and do not claim closure
   - do not include any custom scoring/rating metadata
 - If rebase conflicts cannot be resolved cleanly, stop and ask user before continuing.
 
@@ -97,9 +105,12 @@ Use this skill for semi-automatic issue-to-PR execution in Apollo repositories.
 - PR title rule: use a plain human summary, do not use Conventional Commit prefixes such as `feat:`, `fix:`, `chore:`.
 - Default publish target is Ready for review (non-draft PR).
 - Use Draft PR only when user explicitly requests `draft-only` mode.
+- In PR body, include explicit issue-coverage section with scenario statuses and closure verdict.
+- Use `Fixes #<issue-id>` only for `full` coverage; otherwise use `Refs #<issue-id>`.
 
 8. Human gate before publish
 - Present patch summary + exact PR body first.
+- Present scenario closure map + verdict (`full` / `partial`) before asking to publish.
 - Ask for explicit confirmation before final history rewrite, push, and PR create.
 - No explicit confirmation means no publish action.
 
@@ -140,17 +151,22 @@ Default (`output_mode=human`) output should be human-friendly:
 - scoped change plan
 - non-goals/boundary
 
-3. `Validation Summary`
+3. `Issue Scenario Coverage`
+- verdict: `full` / `partial`
+- scenario statuses with code + test evidence
+- if partial: explicit remaining gap and follow-up recommendation
+
+4. `Validation Summary`
 - commands run + pass/fail
 - residual risks
 
-4. `PR Body`
+5. `PR Body`
 - ready-to-use markdown for `gh pr create --body-file ...`
 
-5. `Publish Gate`
+6. `Publish Gate`
 - one-line confirmation question before push/PR create
 
-6. `Publish Compliance Check`
+7. `Publish Compliance Check`
 - single-commit status
 - rebase-base branch
 - two-phase commit policy followed (`multi-commit during iteration`, `single commit at publish`)
@@ -174,6 +190,9 @@ handoff:
     acceptance_criteria: []
     non_goals: []
     change_plan: []
+    scenario_coverage:
+      verdict: "full|partial"
+      scenarios: []
   delivery_evidence:
     branch: "not-created|codex/issue-<id>-<topic>"
     commits: []
@@ -219,7 +238,10 @@ git rebase -i apollo/master
 # git rebase -i --autosquash apollo/master
 
 # Ensure final single commit message is compliant
+# For full issue coverage:
 git commit --amend -m "<type>: <summary>" -m "Fixes #<issue-id>"
+# For partial issue coverage:
+# git commit --amend -m "<type>: <summary>" -m "Refs #<issue-id>"
 COUNT=$(git rev-list --count apollo/master..HEAD)
 test "$COUNT" -eq 1
 git push --force-with-lease origin codex/issue-<id>-<topic>

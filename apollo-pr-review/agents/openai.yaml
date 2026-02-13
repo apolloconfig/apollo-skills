@@ -1,4 +1,4 @@
 interface:
   display_name: "Apollo PR Review"
   short_description: "Review Apollo ecosystem PRs with maintainer-grade checks"
-  default_prompt: "Use $apollo-pr-review to review this PR, reconcile prior feedback, verify CI and compatibility risks, draft a concise maintainer reply, and ask me to confirm before sending."
+  default_prompt: "Use $apollo-pr-review to review this PR, reconcile prior feedback, verify linked-issue coverage (or infer scope when no issue is linked), check CI and compatibility risks, draft a concise maintainer reply, and ask me to confirm before sending."
