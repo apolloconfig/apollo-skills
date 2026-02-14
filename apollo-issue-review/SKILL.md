@@ -137,7 +137,6 @@ curl --http1.1 -sS -X POST \
   -d '{"body":"<reply>"}' \
   https://api.github.com/repos/<owner>/<repo>/issues/<id>/comments
 ```
-- If local proxy is required, add `-x http://127.0.0.1:7897`.
 - After posting, return the comment URL as evidence.
 
 ## Output Contract

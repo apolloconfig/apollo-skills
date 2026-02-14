@@ -83,12 +83,21 @@ Execute the following steps in order:
 - Then open questions/assumptions.
 - Then issue-coverage verdict (`full` / `partial` / `not addressed`) with scenario statuses.
 - Then a brief addressed-items summary and maintainer comment draft.
+- Maintainer comment draft must follow `Communication Language Policy` below.
 - Include explicit proposed action: `comment`, `request changes`, `approve`, or `merge`.
 
 9. Send only after explicit user confirmation
 - Do not post review/comment automatically after drafting.
 - Ask for confirmation first, then execute the selected GitHub action.
 - If user asks to send immediately, send using the exact confirmed draft unless user requests edits.
+
+## Communication Language Policy
+
+- Default: follow the primary language used by the linked issue + PR discussion.
+- If issue/PR is primarily Chinese, draft maintainer comments/reviews in Chinese.
+- If issue/PR is primarily English, draft maintainer comments/reviews in English.
+- If language is mixed or ambiguous, prefer the language used by the latest maintainer/contributor exchange; if still unclear, ask user once or provide Chinese with a short English summary.
+- If user explicitly requests a language, user request overrides defaults.
 
 ## Severity Rules
 
