@@ -6,6 +6,8 @@
 
 ## GitHub Release body skeleton
 
+Highlights are generated from selected PRs provided via `--highlight-prs`.
+
 ```md
 ## Highlights
 
@@ -37,10 +39,10 @@ Apollo Team is glad to announce the release of Apollo Java {version}.
 
 This release includes the following changes.
 
-- <short PR title> by @<author> in <PR URL>
+* <short PR title> by @<author> in <PR URL>
 
 New contributors in this release:
-- <from generated notes>
+* <from generated notes>
 
 Full changelog: <compare url>
 

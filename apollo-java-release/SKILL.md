@@ -21,6 +21,7 @@ Run this skill when you want to execute the Apollo Java formal release workflow 
 python3 scripts/release_flow.py run \
   --release-version X.Y.Z \
   --next-snapshot A.B.C-SNAPSHOT \
+  --highlight-prs PR_ID_1,PR_ID_2 \
   [--state-file .apollo-java-release-state.json] \
   [--confirm-checkpoint CHECKPOINT]
 ```
@@ -53,6 +54,7 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 - `scripts/release_notes_builder.py`
   - Uses `CHANGES.md` as primary source.
   - Merges GitHub generated notes for `New Contributors` and changelog link.
+  - Builds `Highlights` only from user-selected PRs (`--highlight-prs`) and extracts usage hints from selected PR body/comments/docs changes.
 - `.github/workflows/release.yml` (apollo-java repo)
   - Publishes artifacts via Sonatype Central Maven plugin with auto-publish enabled.
 - `scripts/github_discussion.py`
@@ -69,6 +71,6 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 - Prefer `--dry-run` first to validate plan and checkpoints without side effects.
 - Keep release operations on clean working tree unless explicitly bypassing with `--allow-dirty`.
 - Do not push, create PRs, create releases, trigger workflows, or publish discussions without checkpoint confirmation.
-- Release notes `Highlights` should be concise summaries of key user-facing changes (usually 2~3 items), and must not be hardcoded to a fixed topic.
-- Always show the generated `Highlights` draft to the user and confirm wording before checkpoint `CREATE_PRERELEASE`.
+- `--highlight-prs` is required and determines which PRs are used for `Highlights`; do not auto-pick highlights.
+- Always show generated release PR/release notes/announcement/post-release PR drafts and confirm wording before corresponding publish checkpoints.
 - Release notes `What's Changed` entries should include PR authors using `by @<author> in <PR URL>` format so contributors are notified.

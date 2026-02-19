@@ -7,6 +7,7 @@ Maintainer skills and workflows for semi-automated Apollo community operations:
 - PR review
 - server release orchestration
 - Java client release orchestration
+- helm chart release orchestration
 
 These skills are designed for human-in-the-loop operation by default, with optional machine-readable handoff blocks for pipeline chaining.
 
@@ -56,6 +57,16 @@ Run Apollo server formal release flow with checkpoint-gated automation:
 - announcement discussion creation
 - post-release SNAPSHOT bump PR with `CHANGES.md` archive and milestone management
 
+### 6) `apollo-helm-chart-release`
+
+Run Apollo Helm chart release flow for `apolloconfig/apollo-helm-chart` with local automation and publish gates:
+
+- detect version trigger from chart `version` / `appVersion` diff with docs lag fallback
+- run `helm lint`, package both charts, move tgz to `docs`, and regenerate `docs/index.yaml`
+- enforce whitelist-only git changes before commit
+- create standardized release commit and generate ready-for-review PR draft
+- stop at push/PR gate commands for explicit human confirmation
+
 ## Recommended Flow
 
 1. `apollo-issue-review`
@@ -63,6 +74,7 @@ Run Apollo server formal release flow with checkpoint-gated automation:
 3. `apollo-pr-review`
 4. `apollo-release` (for Apollo server release cycles)
 5. `apollo-java-release` (for formal Java SDK release cycles)
+6. `apollo-helm-chart-release` (for apollo-helm-chart packaging/index/PR flow)
 
 All publish actions remain confirmation-gated by default.
 
@@ -88,6 +100,10 @@ Use $apollo-java-release 2.5.0
 Use $apollo-release 2.5.0
 ```
 
+```text
+Use $apollo-helm-chart-release to release apollo-helm-chart after chart version updates.
+```
+
 ## Repository Layout
 
 ```text
@@ -96,6 +112,7 @@ apollo-issue-to-pr/
 apollo-pr-review/
 apollo-release/
 apollo-java-release/
+apollo-helm-chart-release/
 ```
 
 Each skill contains its own `SKILL.md` and optional `references/` content.
