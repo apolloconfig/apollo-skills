@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apollo Release"
+  short_description: "Run Apollo server release with gated checkpoints"
+  default_prompt: "Use $apollo-release to run the Apollo formal release flow with checkpoint confirmations, GitHub Action package build/upload, and resume support."
