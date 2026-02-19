@@ -5,6 +5,7 @@ Maintainer skills and workflows for semi-automated Apollo community operations:
 - issue review
 - issue-to-PR
 - PR review
+- Java client release orchestration
 
 These skills are designed for human-in-the-loop operation by default, with optional machine-readable handoff blocks for pipeline chaining.
 
@@ -31,42 +32,42 @@ Run maintainer-grade PR review with compatibility/regression focus, then produce
 Default output: human-friendly review decision and findings.  
 Optional: append pipeline handoff fields when `output_mode=pipeline`.
 
+### 4) `apollo-java-release`
+
+Run Apollo Java formal release flow with checkpoint-gated automation:
+
+- release version bump PR
+- GitHub prerelease creation
+- release workflow trigger (auto-publish via central-publishing-maven-plugin)
+- announcement discussion creation
+- post-release SNAPSHOT bump PR
+- prerelease promotion to official release after publish workflow succeeds
+
 ## Recommended Flow
 
 1. `apollo-issue-review`
 2. `apollo-issue-to-pr` (only when issue is ready)
 3. `apollo-pr-review`
+4. `apollo-java-release` (for formal Java SDK release cycles)
 
 All publish actions remain confirmation-gated by default.
-
-## Output Modes
-
-- `output_mode=human` (default): optimized for maintainers reading and deciding.
-- `output_mode=pipeline`: appends a structured `handoff` block for machine chaining.
-
-## Publish Modes
-
-- `publish_mode=draft-only` (default): generate drafts, do not publish automatically.
-- `publish_mode=post-after-confirm` / `send-after-confirm`: publish only after explicit confirmation.
 
 ## Quick Usage Examples
 
 ```text
-Use $apollo-issue-review for issue #12345
-publish_mode=draft-only
-output_mode=human
+Use $apollo-issue-review issue #12345
 ```
 
 ```text
-Use $apollo-issue-to-pr for issue #12345
-publish_mode=draft-only
-output_mode=pipeline
+Use $apollo-issue-to-pr issue #12345
 ```
 
 ```text
-Use $apollo-pr-review for PR #6789
-publish_mode=draft-only
-output_mode=human
+Use $apollo-pr-review PR #6789
+```
+
+```text
+Use $apollo-java-release 2.5.0
 ```
 
 ## Repository Layout
@@ -75,6 +76,7 @@ output_mode=human
 apollo-issue-review/
 apollo-issue-to-pr/
 apollo-pr-review/
+apollo-java-release/
 ```
 
 Each skill contains its own `SKILL.md` and optional `references/` content.

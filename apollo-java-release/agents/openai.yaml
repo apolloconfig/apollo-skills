@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apollo Java Release"
+  short_description: "Run Apollo Java release with gated checkpoints"
+  default_prompt: "Use $apollo-java-release to run the Apollo Java formal release flow with explicit checkpoint confirmations and resume support."
