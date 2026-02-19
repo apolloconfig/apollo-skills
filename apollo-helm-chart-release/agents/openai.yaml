@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apollo Helm Chart Release"
+  short_description: "Release apollo-helm-chart with package/index PR gates"
+  default_prompt: "Use $apollo-helm-chart-release to package and publish apollo-helm-chart after chart version updates with confirmation gates."

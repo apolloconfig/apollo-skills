@@ -21,7 +21,7 @@ Run this skill when you want to execute the Apollo Java formal release workflow 
 python3 scripts/release_flow.py run \
   --release-version X.Y.Z \
   --next-snapshot A.B.C-SNAPSHOT \
-  --highlight-prs 115,121 \
+  --highlight-prs PR_ID_1,PR_ID_2 \
   [--state-file .apollo-java-release-state.json] \
   [--confirm-checkpoint CHECKPOINT]
 ```
