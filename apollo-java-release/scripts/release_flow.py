@@ -21,7 +21,10 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from github_discussion import create_discussion  # noqa: E402
-from release_notes_builder import build_release_content  # noqa: E402
+from release_notes_builder import (  # noqa: E402
+    build_release_content,
+    parse_highlight_pr_numbers,
+)
 
 UPSTREAM_REPO = "apolloconfig/apollo-java"
 DEFAULT_STATE_FILE = ".apollo-java-release-state.json"
@@ -55,9 +58,9 @@ class ReleaseFlow:
         self.repo_root = Path.cwd().resolve()
         self.state_path = (self.repo_root / args.state_file).resolve()
         self.state = self._load_state()
-        self._validate_version_inputs()
+        self._validate_inputs()
 
-    def _validate_version_inputs(self) -> None:
+    def _validate_inputs(self) -> None:
         if not re.fullmatch(r"\d+\.\d+\.\d+", self.args.release_version):
             raise ReleaseFlowError("--release-version must be in x.y.z format")
         if not re.fullmatch(r"\d+\.\d+\.\d+-SNAPSHOT", self.args.next_snapshot):
@@ -76,8 +79,31 @@ class ReleaseFlow:
                 f"state={existing_next_snapshot}, arg={self.args.next_snapshot}"
             )
 
+        highlight_prs_arg = (self.args.highlight_prs or "").strip()
+        parsed_highlight_prs: Optional[list[int]] = None
+        if highlight_prs_arg:
+            try:
+                parsed_highlight_prs = parse_highlight_pr_numbers(highlight_prs_arg)
+            except ValueError as exc:
+                raise ReleaseFlowError(f"--highlight-prs is invalid: {exc}") from exc
+
+        existing_highlight_prs = self.state.get("highlight_prs")
+        if parsed_highlight_prs and existing_highlight_prs:
+            if list(existing_highlight_prs) != parsed_highlight_prs:
+                raise ReleaseFlowError(
+                    "State file highlight_prs mismatch. "
+                    f"state={existing_highlight_prs}, arg={parsed_highlight_prs}"
+                )
+
+        resolved_highlight_prs = parsed_highlight_prs or existing_highlight_prs
+        if not resolved_highlight_prs:
+            raise ReleaseFlowError(
+                "--highlight-prs is required, e.g. --highlight-prs 115,121"
+            )
+
         self.state["release_version"] = self.args.release_version
         self.state["next_snapshot"] = self.args.next_snapshot
+        self.state["highlight_prs"] = list(resolved_highlight_prs)
         self._save_state()
 
     def _load_state(self) -> dict[str, Any]:
@@ -363,9 +389,10 @@ class ReleaseFlow:
         if self._step_done("release_pr_created"):
             return
 
+        print(f"Generated release PR draft: {self.state['release_pr_body_path']}")
         self._checkpoint(
             "PUSH_RELEASE_PR",
-            "Push release branch and create the release preparation PR.",
+            "Review release PR draft, then push release branch and create the release preparation PR.",
         )
 
         if self.args.dry_run:
@@ -470,6 +497,7 @@ class ReleaseFlow:
             release_version=self.args.release_version,
             changes_file=self.repo_root / "CHANGES.md",
             target_commitish="main",
+            highlight_pr_numbers=list(self.state.get("highlight_prs", [])),
         )
         notes_path.write_text(content["release_notes"], encoding="utf-8")
 
@@ -481,13 +509,15 @@ class ReleaseFlow:
             content["announcement"], encoding="utf-8"
         )
         self.state["release_previous_tag"] = content.get("previous_tag")
+        self.state["highlight_candidates"] = content.get("highlights")
         self._save_state()
         print(f"Generated release notes draft: {self.state['release_notes_path']}")
         print(f"Generated announcement draft: {self.state['announcement_body_path']}")
+        self._print_highlights(content.get("highlights", []))
 
         self._checkpoint(
             "CREATE_PRERELEASE",
-            "Review generated release notes/announcement and confirm before creating GitHub pre-release.",
+            "Review generated release notes/announcement and confirm highlights wording before creating GitHub pre-release.",
         )
 
         if self.args.dry_run:
@@ -527,6 +557,17 @@ class ReleaseFlow:
             },
         )
         self._mark_timestamp("prerelease_created_at")
+
+    def _print_highlights(self, highlights: list[dict[str, str]]) -> None:
+        if not highlights:
+            print("No highlights generated.")
+            return
+        print("Selected highlights:")
+        for index, item in enumerate(highlights, start=1):
+            title = item.get("title", "Release Update")
+            body = item.get("body", "")
+            print(f"  {index}. {title}")
+            print(f"     {body}")
 
     def _trigger_release_workflow(self) -> None:
         if self._step_done("release_workflow_completed"):
@@ -661,7 +702,7 @@ class ReleaseFlow:
         if change_lines:
             lines.extend(change_lines)
         else:
-            lines.append("- No user-facing changes were listed in release notes.")
+            lines.append("* No user-facing changes were listed in release notes.")
 
         if contributor_lines:
             lines.extend(["", "New contributors in this release:"])
@@ -709,10 +750,11 @@ class ReleaseFlow:
             return
 
         self._sync_announcement_with_release_notes()
+        print(f"Generated announcement draft: {self.state['announcement_body_path']}")
 
         self._checkpoint(
             "CREATE_ANNOUNCEMENT_DISCUSSION",
-            "Create GitHub discussion in Announcements category.",
+            "Review announcement draft and then create GitHub discussion in Announcements category.",
         )
 
         title = f"[Announcement] Apollo Java {self.args.release_version} released"
@@ -791,9 +833,10 @@ class ReleaseFlow:
         body_path = self.repo_root / ".git" / f"post-release-pr-{next_release}.md"
         body_path.write_text(self._render_post_release_pr_body(next_release), encoding="utf-8")
 
+        print(f"Generated post-release PR draft: {body_path}")
         self._checkpoint(
             "PUSH_POST_RELEASE_PR",
-            "Push post-release branch and create snapshot bump PR.",
+            "Review post-release PR draft, then push branch and create snapshot bump PR.",
         )
 
         if self.args.dry_run:
@@ -1009,6 +1052,7 @@ class ReleaseFlow:
         report = {
             "release_version": self.args.release_version,
             "next_snapshot": self.args.next_snapshot,
+            "highlight_prs": self.state.get("highlight_prs"),
             "state_file": str(self.state_path),
             "release_pr_url": self.state.get("release_pr_url"),
             "release_url": self.state.get("release_url"),
@@ -1020,13 +1064,18 @@ class ReleaseFlow:
         print(json.dumps(report, indent=2, ensure_ascii=True))
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apollo Java release flow orchestrator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run = subparsers.add_parser("run", help="Execute release flow")
     run.add_argument("--release-version", required=True)
     run.add_argument("--next-snapshot", required=True)
+    run.add_argument(
+        "--highlight-prs",
+        default="",
+        help="Comma-separated PR numbers used for Highlights, e.g. 115,121",
+    )
     run.add_argument("--state-file", default=DEFAULT_STATE_FILE)
     run.add_argument("--confirm-checkpoint", choices=sorted(CHECKPOINTS), default=None)
     run.add_argument("--dry-run", action="store_true")
@@ -1036,7 +1085,7 @@ def parse_args() -> argparse.Namespace:
     run.add_argument("--pr-merge-timeout-minutes", type=int, default=360)
     run.add_argument("--workflow-start-timeout-minutes", type=int, default=10)
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
