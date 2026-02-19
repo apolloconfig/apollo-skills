@@ -21,7 +21,7 @@ Run this skill when you want to execute the Apollo server formal release workflo
 python3 scripts/release_flow.py run \
   --release-version X.Y.Z \
   --next-snapshot A.B.C-SNAPSHOT \
-  --highlight-prs 5336,5361,5365 \
+  --highlight-prs PR_ID_1,PR_ID_2,PR_ID_3 \
   [--state-file .apollo-release-state.json] \
   [--previous-tag vP.Q.R] \
   [--confirm-checkpoint CHECKPOINT]
