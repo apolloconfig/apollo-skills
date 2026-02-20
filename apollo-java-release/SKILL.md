@@ -43,7 +43,7 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 3. Trigger `.github/workflows/release.yml`; the workflow publishes through `central-publishing-maven-plugin` with `autoPublish=true` and waits until `published`.
 4. Publish announcement discussion in `Announcements` with title/body aligned to existing Apollo Java style.
 5. Post-release housekeeping: bump to next SNAPSHOT, archive `CHANGES.md`, close/create milestones, and open post-release PR.
-6. Promote prerelease tag to official release after workflow publish succeeds.
+6. Promote prerelease tag to official release, mark it as `latest`, after workflow publish succeeds.
 7. Print final report with PR/release/workflow/discussion links for traceability.
 
 ## Scripts
