@@ -785,7 +785,7 @@ class ReleaseFlow:
 
         self._checkpoint(
             "PROMOTE_RELEASE",
-            "Promote prerelease to official release.",
+            "Promote prerelease to official release and mark it as latest.",
         )
 
         if self.args.dry_run:
@@ -801,6 +801,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--prerelease=false",
+                "--latest",
             ],
             mutate=True,
             check=True,

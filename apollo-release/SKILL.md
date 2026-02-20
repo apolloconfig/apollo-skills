@@ -47,7 +47,7 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 3. Trigger `.github/workflows/release-packages.yml` with JDK 8 build in GitHub Action; workflow uploads three zip packages and three sha1 assets to release.
 4. Verify release assets exist in release page after package workflow succeeds.
 5. Trigger `.github/workflows/docker-publish.yml` on `master` with release version and wait for completion.
-6. Promote prerelease to official release and publish announcement discussion in `Announcements`.
+6. Promote prerelease to official release, mark it as `latest`, and publish announcement discussion in `Announcements`.
 7. Post-release housekeeping: bump to next SNAPSHOT, archive `CHANGES.md`, auto-manage milestones, and open post-release PR.
 
 ## Scripts

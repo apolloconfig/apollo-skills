@@ -968,6 +968,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--prerelease=false",
+                "--latest",
             ],
             mutate=True,
             check=True,
