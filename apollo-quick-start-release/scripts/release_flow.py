@@ -34,6 +34,8 @@ STATE_RESERVED_KEYS = {
     "docker_tag",
     "steps",
     "timestamps",
+    "pending_checkpoint",
+    "pending_message",
 }
 
 
@@ -491,7 +493,14 @@ class ReleaseFlow:
             ],
             check=True,
         )
-        payload = json.loads(result.stdout or "[]")
+        try:
+            payload = json.loads(result.stdout or "[]")
+        except json.JSONDecodeError as exc:
+            raise ReleaseFlowError(
+                "Failed to parse JSON from `gh pr list`.\n"
+                f"stdout:\n{result.stdout}\n"
+                f"stderr:\n{result.stderr}"
+            ) from exc
         if not isinstance(payload, list):
             raise ReleaseFlowError(f"Unexpected PR list payload: {payload}")
         return payload
@@ -581,7 +590,14 @@ class ReleaseFlow:
                 check=True,
                 timeout_seconds=RUN_LIST_TIMEOUT_SECONDS,
             )
-            runs = json.loads(result.stdout or "[]")
+            try:
+                runs = json.loads(result.stdout or "[]")
+            except json.JSONDecodeError as exc:
+                raise ReleaseFlowError(
+                    f"Failed to parse JSON from `gh run list` for {workflow}.\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                ) from exc
             if not isinstance(runs, list):
                 raise ReleaseFlowError(f"Unexpected workflow runs payload for {workflow}: {runs}")
             matched = select_workflow_run(runs, started_at)

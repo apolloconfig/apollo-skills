@@ -170,6 +170,67 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
                 with self.assertRaises(release_flow.ReleaseFlowError):
                     ReleaseFlow(args)
 
+    def test_reserved_keys_include_checkpoint_fields(self) -> None:
+        self.assertIn("pending_checkpoint", release_flow.STATE_RESERVED_KEYS)
+        self.assertIn("pending_message", release_flow.STATE_RESERVED_KEYS)
+
+    def test_find_sync_prs_invalid_json_raises_release_flow_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.0",
+                    "--state-file",
+                    "state.json",
+                    "--dry-run",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=repo_root):
+                flow = ReleaseFlow(args)
+            with mock.patch.object(
+                flow,
+                "_run_command",
+                return_value=release_flow.CommandResult(
+                    stdout="{not-json",
+                    stderr="simulated stderr",
+                    returncode=0,
+                ),
+            ):
+                with self.assertRaises(release_flow.ReleaseFlowError):
+                    flow._find_sync_prs(branch="codex/quick-start-sync-2.5.0")
+
+    def test_wait_for_new_run_invalid_json_raises_release_flow_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.0",
+                    "--state-file",
+                    "state.json",
+                    "--dry-run",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=repo_root):
+                flow = ReleaseFlow(args)
+            with mock.patch.object(
+                flow,
+                "_run_command",
+                return_value=release_flow.CommandResult(
+                    stdout="{not-json",
+                    stderr="simulated stderr",
+                    returncode=0,
+                ),
+            ):
+                with self.assertRaises(release_flow.ReleaseFlowError):
+                    flow._wait_for_new_run(
+                        workflow=release_flow.SYNC_WORKFLOW,
+                        started_at=datetime(2026, 2, 21, 8, 0, 0, tzinfo=timezone.utc),
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
