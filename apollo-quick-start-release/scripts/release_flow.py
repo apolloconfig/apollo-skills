@@ -22,6 +22,7 @@ DEFAULT_STATE_FILE = ".apollo-quick-start-release-state.json"
 SYNC_WORKFLOW = "sync-apollo-release.yml"
 DOCKER_WORKFLOW = "docker-publish.yml"
 SYNC_BRANCH_PREFIX = "codex/quick-start-sync-"
+RUN_LIST_TIMEOUT_SECONDS = 30
 
 CHECKPOINTS = {
     "TRIGGER_SYNC_WORKFLOW",
@@ -265,7 +266,8 @@ class ReleaseFlow:
 
         if not self.args.skip_auth_check:
             auth_status = self._run_command(["gh", "auth", "status", "-h", "github.com"], check=True)
-            scopes_match = re.search(r"Token scopes:\s*(.+)", auth_status.stdout)
+            auth_output = auth_status.stdout.strip() or auth_status.stderr
+            scopes_match = re.search(r"Token scopes:\s*(.+)", auth_output)
             if scopes_match:
                 scopes_text = scopes_match.group(1).strip()
                 scopes = {
@@ -274,7 +276,7 @@ class ReleaseFlow:
                     if token.strip()
                 }
             else:
-                scopes_text = auth_status.stdout
+                scopes_text = auth_output
                 scopes = {
                     token.strip()
                     for token in re.split(r"[\s,]+", scopes_text)
@@ -401,7 +403,6 @@ class ReleaseFlow:
                 UPSTREAM_REPO,
                 "--exit-status",
             ],
-            mutate=True,
             check=True,
             timeout_seconds=self.args.watch_timeout_seconds,
         )
@@ -545,7 +546,6 @@ class ReleaseFlow:
                 UPSTREAM_REPO,
                 "--exit-status",
             ],
-            mutate=True,
             check=True,
             timeout_seconds=self.args.watch_timeout_seconds,
         )
@@ -579,6 +579,7 @@ class ReleaseFlow:
                     "databaseId,createdAt,status,url,conclusion,headBranch,event",
                 ],
                 check=True,
+                timeout_seconds=RUN_LIST_TIMEOUT_SECONDS,
             )
             runs = json.loads(result.stdout or "[]")
             if not isinstance(runs, list):
