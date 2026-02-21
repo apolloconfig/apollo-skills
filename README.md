@@ -90,34 +90,16 @@ Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
 
 All publish actions remain confirmation-gated by default.
 
-## Quick Usage Examples
+## Quick Usage
 
 ```text
-Use $apollo-issue-review issue #12345
-```
-
-```text
-Use $apollo-issue-to-pr issue #12345
-```
-
-```text
-Use $apollo-pr-review PR #6789
-```
-
-```text
-Use $apollo-java-release 2.5.0
-```
-
-```text
-Use $apollo-release 2.5.0
-```
-
-```text
+Use $apollo-issue-review <issue-id>
+Use $apollo-issue-to-pr <issue-id>
+Use $apollo-pr-review <pr-id>
+Use $apollo-java-release <release-version>
+Use $apollo-release <release-version>
 Use $apollo-helm-chart-release
-```
-
-```text
-Use $apollo-quick-start-release 2.5.0
+Use $apollo-quick-start-release <release-version>
 ```
 
 ## Repository Layout

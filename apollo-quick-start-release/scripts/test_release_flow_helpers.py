@@ -106,6 +106,36 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
         self.assertIsNotNone(selected)
         self.assertEqual(selected["databaseId"], 2)
 
+    def test_select_workflow_run_empty_list(self) -> None:
+        started_at = datetime(2026, 2, 21, 8, 0, 0, tzinfo=timezone.utc)
+        self.assertIsNone(release_flow.select_workflow_run([], started_at))
+
+    def test_select_workflow_run_before_threshold(self) -> None:
+        started_at = datetime(2026, 2, 21, 8, 0, 0, tzinfo=timezone.utc)
+        runs = [
+            {
+                "databaseId": 1,
+                "createdAt": "2026-02-21T07:59:54Z",
+            },
+            {
+                "databaseId": 2,
+                "createdAt": "2026-02-21T07:59:00Z",
+            },
+        ]
+        self.assertIsNone(release_flow.select_workflow_run(runs, started_at))
+
+    def test_select_workflow_run_threshold_boundary(self) -> None:
+        started_at = datetime(2026, 2, 21, 8, 0, 0, tzinfo=timezone.utc)
+        runs = [
+            {
+                "databaseId": 99,
+                "createdAt": "2026-02-21T07:59:55Z",
+            }
+        ]
+        selected = release_flow.select_workflow_run(runs, started_at)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["databaseId"], 99)
+
     def test_is_pr_merged(self) -> None:
         merged_pr = {"number": 12, "mergedAt": "2026-02-21T09:01:02Z"}
         open_pr = {"number": 13, "mergedAt": None}
@@ -121,6 +151,24 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
         }
         for raw, expected in cases.items():
             self.assertEqual(ReleaseFlow._normalize_github_slug(raw), expected)
+
+    def test_corrupted_state_file_raises_release_flow_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            state_path = repo_root / "state.json"
+            state_path.write_text('{"release_version": "2.5.0",', encoding="utf-8")
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.0",
+                    "--state-file",
+                    "state.json",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=repo_root):
+                with self.assertRaises(release_flow.ReleaseFlowError):
+                    ReleaseFlow(args)
 
 
 if __name__ == "__main__":

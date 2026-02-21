@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -24,6 +26,13 @@ SYNC_BRANCH_PREFIX = "codex/quick-start-sync-"
 CHECKPOINTS = {
     "TRIGGER_SYNC_WORKFLOW",
     "TRIGGER_DOCKER_WORKFLOW",
+}
+
+STATE_RESERVED_KEYS = {
+    "release_version",
+    "docker_tag",
+    "steps",
+    "timestamps",
 }
 
 
@@ -46,7 +55,8 @@ def parse_semver(version: str) -> tuple[int, int, int]:
     match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version or "")
     if not match:
         raise ValueError(f"Invalid semantic version: {version}")
-    return tuple(int(part) for part in match.groups())
+    major_text, minor_text, patch_text = match.groups()
+    return (int(major_text), int(minor_text), int(patch_text))
 
 
 def select_workflow_run(
@@ -113,7 +123,13 @@ class ReleaseFlow:
 
     def _load_state(self) -> dict[str, Any]:
         if self.state_path.exists():
-            return json.loads(self.state_path.read_text(encoding="utf-8"))
+            try:
+                return json.loads(self.state_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ReleaseFlowError(
+                    f"State file {self.state_path} is corrupted. "
+                    "Delete it to restart, or fix the JSON manually."
+                ) from exc
         return {
             "release_version": None,
             "docker_tag": None,
@@ -122,10 +138,23 @@ class ReleaseFlow:
         }
 
     def _save_state(self) -> None:
-        self.state_path.write_text(
-            json.dumps(self.state, indent=2, ensure_ascii=True, sort_keys=True) + "\n",
+        content = json.dumps(self.state, indent=2, ensure_ascii=True, sort_keys=True) + "\n"
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
             encoding="utf-8",
-        )
+            dir=str(self.state_path.parent),
+            prefix=f".{self.state_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = Path(temp_file.name)
+
+        temp_path.replace(self.state_path)
 
     def _mark_timestamp(self, key: str) -> None:
         self.state.setdefault("timestamps", {})[key] = datetime.now(timezone.utc).isoformat()
@@ -137,6 +166,11 @@ class ReleaseFlow:
     def _mark_step_done(self, key: str, metadata: Optional[dict[str, Any]] = None) -> None:
         self.state.setdefault("steps", {})[key] = True
         if metadata:
+            conflicts = STATE_RESERVED_KEYS.intersection(metadata.keys())
+            if conflicts:
+                raise ReleaseFlowError(
+                    "Step metadata contains reserved keys: " + ", ".join(sorted(conflicts))
+                )
             self.state.update(metadata)
         self._save_state()
 
@@ -146,11 +180,26 @@ class ReleaseFlow:
         *,
         mutate: bool = False,
         check: bool = True,
+        timeout_seconds: Optional[int] = None,
     ) -> CommandResult:
         if self.args.dry_run and mutate:
             print(f"[dry-run] {' '.join(cmd)}")
             return CommandResult(stdout="", stderr="", returncode=0)
-        completed = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout_text = exc.stdout if isinstance(exc.stdout, str) else ""
+            stderr_text = exc.stderr if isinstance(exc.stderr, str) else ""
+            raise ReleaseFlowError(
+                f"Command timed out after {timeout_seconds} seconds: {' '.join(cmd)}\n"
+                f"stdout:\n{stdout_text}\n"
+                f"stderr:\n{stderr_text}"
+            ) from exc
         if check and completed.returncode != 0:
             raise ReleaseFlowError(
                 f"Command failed ({completed.returncode}): {' '.join(cmd)}\n"
@@ -266,7 +315,10 @@ class ReleaseFlow:
         path_text = status_line[3:].strip()
         if " -> " in path_text:
             path_text = path_text.split(" -> ", 1)[1].strip()
-        state_rel = self.state_path.relative_to(self.repo_root).as_posix()
+        try:
+            state_rel = self.state_path.relative_to(self.repo_root).as_posix()
+        except ValueError:
+            state_rel = os.path.relpath(self.state_path, self.repo_root).replace("\\", "/")
         return path_text == state_rel
 
     def _list_remotes(self) -> dict[str, str]:
@@ -351,6 +403,7 @@ class ReleaseFlow:
             ],
             mutate=True,
             check=True,
+            timeout_seconds=self.args.watch_timeout_seconds,
         )
 
         self._mark_step_done(
@@ -494,6 +547,7 @@ class ReleaseFlow:
             ],
             mutate=True,
             check=True,
+            timeout_seconds=self.args.watch_timeout_seconds,
         )
 
         self._mark_step_done(
@@ -570,6 +624,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     run.add_argument("--skip-auth-check", action="store_true")
     run.add_argument("--poll-interval-seconds", type=int, default=20)
     run.add_argument("--workflow-start-timeout-minutes", type=int, default=10)
+    run.add_argument("--watch-timeout-seconds", type=int, default=7200)
 
     return parser.parse_args(argv)
 
