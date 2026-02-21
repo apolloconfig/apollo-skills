@@ -113,11 +113,11 @@ Use $apollo-release 2.5.0
 ```
 
 ```text
-Use $apollo-helm-chart-release to release apollo-helm-chart after chart version updates.
+Use $apollo-helm-chart-release
 ```
 
 ```text
-Use $apollo-quick-start-release to sync quick-start release assets and then publish docker image with checkpoints.
+Use $apollo-quick-start-release 2.5.0
 ```
 
 ## Repository Layout
