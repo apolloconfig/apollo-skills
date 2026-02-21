@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apollo Quick Start Release"
+  short_description: "Run quick-start sync and docker publish with checkpoints"
+  default_prompt: "Use $apollo-quick-start-release to run the quick-start release flow with sync and docker workflow checkpoints."

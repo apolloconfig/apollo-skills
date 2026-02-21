@@ -8,6 +8,7 @@ Maintainer skills and workflows for semi-automated Apollo community operations:
 - server release orchestration
 - Java client release orchestration
 - helm chart release orchestration
+- quick-start release orchestration
 
 These skills are designed for human-in-the-loop operation by default, with optional machine-readable handoff blocks for pipeline chaining.
 
@@ -67,6 +68,16 @@ Run Apollo Helm chart release flow for `apolloconfig/apollo-helm-chart` with loc
 - create standardized release commit and generate ready-for-review PR draft
 - stop at push/PR gate commands for explicit human confirmation
 
+### 7) `apollo-quick-start-release`
+
+Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
+
+- trigger quick-start asset sync workflow (`sync-apollo-release.yml`) for release version updates
+- wait for sync workflow completion and inspect fixed-branch PR status (`codex/quick-start-sync-<version>`)
+- require PR merge confirmation before docker publish when sync changes exist
+- trigger docker publish workflow (`docker-publish.yml`) with configurable tag (default: release version)
+- support resume via state file and explicit checkpoint confirmations
+
 ## Recommended Flow
 
 1. `apollo-issue-review`
@@ -75,33 +86,20 @@ Run Apollo Helm chart release flow for `apolloconfig/apollo-helm-chart` with loc
 4. `apollo-release` (for Apollo server release cycles)
 5. `apollo-java-release` (for formal Java SDK release cycles)
 6. `apollo-helm-chart-release` (for apollo-helm-chart packaging/index/PR flow)
+7. `apollo-quick-start-release` (for apollo-quick-start sync PR + docker publish flow)
 
 All publish actions remain confirmation-gated by default.
 
-## Quick Usage Examples
+## Quick Usage
 
 ```text
-Use $apollo-issue-review issue #12345
-```
-
-```text
-Use $apollo-issue-to-pr issue #12345
-```
-
-```text
-Use $apollo-pr-review PR #6789
-```
-
-```text
-Use $apollo-java-release 2.5.0
-```
-
-```text
-Use $apollo-release 2.5.0
-```
-
-```text
-Use $apollo-helm-chart-release to release apollo-helm-chart after chart version updates.
+Use $apollo-issue-review <issue-id>
+Use $apollo-issue-to-pr <issue-id>
+Use $apollo-pr-review <pr-id>
+Use $apollo-java-release <release-version>
+Use $apollo-release <release-version>
+Use $apollo-helm-chart-release
+Use $apollo-quick-start-release <release-version>
 ```
 
 ## Repository Layout
@@ -113,6 +111,7 @@ apollo-pr-review/
 apollo-release/
 apollo-java-release/
 apollo-helm-chart-release/
+apollo-quick-start-release/
 ```
 
 Each skill contains its own `SKILL.md` and optional `references/` content.
