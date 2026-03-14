@@ -13,7 +13,7 @@ Run this skill when you want to execute the Apollo server formal release workflo
 - Require current directory to be Apollo repository root (`apollo` + root `pom.xml` artifactId `apollo`).
 - Require at least one git remote URL that normalizes to `github.com/apolloconfig/apollo`.
 - Require explicit checkpoint confirmation before each external publish action.
-- Persist progress in a state file and support resume without repeating completed steps.
+- Persist progress in a state file under `.git/` by default and support resume without repeating completed steps.
 
 ## Command Entry
 
@@ -22,10 +22,13 @@ python3 scripts/release_flow.py run \
   --release-version X.Y.Z \
   --next-snapshot A.B.C-SNAPSHOT \
   --highlight-prs PR_ID_1,PR_ID_2,PR_ID_3 \
-  [--state-file .apollo-release-state.json] \
+  [--state-file .git/apollo-release-state.json] \
   [--previous-tag vP.Q.R] \
+  [--target-branch master] \
   [--confirm-checkpoint CHECKPOINT]
 ```
+
+Use `--target-branch 2.x` for maintenance-line releases. If omitted, the flow targets `master`.
 
 ### Supported checkpoints
 
@@ -43,10 +46,10 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 ## Step Mapping (1~7)
 
 1. Bump root `pom.xml` revision from `X.Y.Z-SNAPSHOT` to `X.Y.Z`, create release branch/commit/PR draft.
-2. Wait for release PR merge, generate release note and announcement drafts from `CHANGES.md`, and create GitHub prerelease (`vX.Y.Z`, target `master`).
+2. Wait for release PR merge, generate release note and announcement drafts from `CHANGES.md`, and create GitHub prerelease (`vX.Y.Z`, target `--target-branch`).
 3. Trigger `.github/workflows/release-packages.yml` with JDK 8 build in GitHub Action; workflow uploads three zip packages and three sha1 assets to release.
 4. Verify release assets exist in release page after package workflow succeeds.
-5. Trigger `.github/workflows/docker-publish.yml` on `master` with release version and wait for completion.
+5. Trigger `.github/workflows/docker-publish.yml` on `--target-branch` with release version and wait for completion.
 6. Promote prerelease to official release, mark it as `latest`, and publish announcement discussion in `Announcements`.
 7. Post-release housekeeping: bump to next SNAPSHOT, archive `CHANGES.md`, auto-manage milestones, and open post-release PR.
 
@@ -72,8 +75,12 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 ## Operational Notes
 
 - Prefer `--dry-run` first to validate step order and checkpoint prompts.
+- Default state file lives under `.git/` so preflight clean-tree checks are not polluted by the workflow state itself.
+- Default release target is `master`; set `--target-branch` for release branches such as `2.x`.
 - Keep release operations on a clean working tree unless explicitly using `--allow-dirty`.
 - Do not push, create PRs/releases, trigger workflows, edit milestones, or publish discussions without checkpoint confirmation.
 - Build `What's Changed` from `CHANGES.md` entries, but render each PR item as `... by @<author> in <PR URL>` so contributor mentions are preserved.
 - `Highlights` PR list must be provided explicitly via `--highlight-prs`; do not auto-pick highlights.
 - Always review generated `Highlights` draft and confirm wording before checkpoint `CREATE_PRERELEASE`.
+- Resume runs with the same `--target-branch`; the state file now records and validates it.
+- After a successful full run, the workflow auto-cleans generated temp artifacts such as the state file and `.git` draft files (`release-notes`, `announcement`, `release-pr`, `post-release-pr`). If announcement posting falls back to `manual_required`, temp artifacts are kept for manual recovery.
