@@ -28,7 +28,7 @@ from release_notes_builder import (  # noqa: E402
 )
 
 UPSTREAM_REPO = "apolloconfig/apollo"
-DEFAULT_STATE_FILE = ".apollo-release-state.json"
+DEFAULT_STATE_FILE = ".git/apollo-release-state.json"
 PACKAGE_WORKFLOW = "release-packages.yml"
 DOCKER_WORKFLOW = "docker-publish.yml"
 CHECKPOINTS = {
@@ -71,6 +71,10 @@ class ReleaseFlow:
             raise ReleaseFlowError("--release-version must be in x.y.z format")
         if not re.fullmatch(r"\d+\.\d+\.\d+-SNAPSHOT", self.args.next_snapshot):
             raise ReleaseFlowError("--next-snapshot must be in x.y.z-SNAPSHOT format")
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", self.args.target_branch):
+            raise ReleaseFlowError(
+                "--target-branch must contain only letters, digits, dot, underscore, slash, or hyphen"
+            )
         if self.args.previous_tag:
             try:
                 self.args.previous_tag = normalize_tag(self.args.previous_tag)
@@ -79,6 +83,7 @@ class ReleaseFlow:
 
         existing_release_version = self.state.get("release_version")
         existing_next_snapshot = self.state.get("next_snapshot")
+        existing_target_branch = self.state.get("target_branch")
         if existing_release_version and existing_release_version != self.args.release_version:
             raise ReleaseFlowError(
                 "State file release_version mismatch. "
@@ -88,6 +93,11 @@ class ReleaseFlow:
             raise ReleaseFlowError(
                 "State file next_snapshot mismatch. "
                 f"state={existing_next_snapshot}, arg={self.args.next_snapshot}"
+            )
+        if existing_target_branch and existing_target_branch != self.args.target_branch:
+            raise ReleaseFlowError(
+                "State file target_branch mismatch. "
+                f"state={existing_target_branch}, arg={self.args.target_branch}"
             )
 
         highlight_prs_arg = (self.args.highlight_prs or "").strip()
@@ -114,6 +124,7 @@ class ReleaseFlow:
 
         self.state["release_version"] = self.args.release_version
         self.state["next_snapshot"] = self.args.next_snapshot
+        self.state["target_branch"] = self.args.target_branch
         self.state["highlight_prs"] = list(resolved_highlight_prs)
         self._save_state()
 
@@ -128,6 +139,7 @@ class ReleaseFlow:
         }
 
     def _save_state(self) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text(
             json.dumps(self.state, indent=2, ensure_ascii=True, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -204,7 +216,52 @@ class ReleaseFlow:
         self._promote_release()
         self._create_announcement_discussion()
         self._prepare_post_release_pr()
-        self._print_final_report()
+        cleaned_artifacts = self._cleanup_temp_artifacts()
+        self._print_final_report(cleaned_artifacts)
+
+    def _should_cleanup_temp_artifacts(self) -> bool:
+        return (
+            not self.args.dry_run
+            and self._step_done("post_release_pr_created")
+            and self.state.get("announcement_status") != "manual_required"
+        )
+
+    def _cleanup_temp_artifacts(self) -> list[str]:
+        if not self._should_cleanup_temp_artifacts():
+            return []
+
+        raw_paths = [
+            self.state.get("release_pr_body_path"),
+            self.state.get("release_notes_path"),
+            self.state.get("announcement_body_path"),
+            self.state.get("post_release_pr_body_path"),
+            str(self.state_path),
+        ]
+        cleaned: list[str] = []
+        seen: set[Path] = set()
+        for raw_path in raw_paths:
+            if not raw_path:
+                continue
+
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = (self.repo_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                print(f"WARNING: failed to remove temp artifact {candidate}: {exc}", file=sys.stderr)
+            else:
+                cleaned.append(str(candidate))
+        return cleaned
 
     def _preflight(self) -> None:
         if self._step_done("preflight"):
@@ -351,10 +408,11 @@ class ReleaseFlow:
         if not self._step_done("release_pr_prepared"):
             release_branch = f"codex/release-{self.args.release_version}"
             upstream_remote = self.state["upstream_remote"]
+            target_branch = self.args.target_branch
 
-            self._run_command(["git", "fetch", upstream_remote, "master"], mutate=True, check=True)
+            self._run_command(["git", "fetch", upstream_remote, target_branch], mutate=True, check=True)
             self._run_command(
-                ["git", "checkout", "-B", release_branch, f"{upstream_remote}/master"],
+                ["git", "checkout", "-B", release_branch, f"{upstream_remote}/{target_branch}"],
                 mutate=True,
                 check=True,
             )
@@ -380,7 +438,10 @@ class ReleaseFlow:
                 )
 
             body_path = self.repo_root / ".git" / f"release-pr-{self.args.release_version}.md"
-            body_path.write_text(self._render_release_pr_body(self.args.release_version), encoding="utf-8")
+            body_path.write_text(
+                self._render_release_pr_body(self.args.release_version, target_branch),
+                encoding="utf-8",
+            )
 
             self._mark_step_done(
                 "release_pr_prepared",
@@ -425,7 +486,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--base",
-                "master",
+                self.args.target_branch,
                 "--head",
                 head_ref,
                 "--title",
@@ -498,7 +559,7 @@ class ReleaseFlow:
             repo=UPSTREAM_REPO,
             release_version=self.args.release_version,
             changes_file=self.repo_root / "CHANGES.md",
-            target_commitish="master",
+            target_commitish=self.args.target_branch,
             highlight_pr_numbers=list(self.state.get("highlight_prs", [])),
             previous_tag_name=self.args.previous_tag,
             delta_src_root=self.repo_root / "scripts/sql/src/delta",
@@ -542,7 +603,7 @@ class ReleaseFlow:
             "--repo",
             UPSTREAM_REPO,
             "--target",
-            "master",
+            self.args.target_branch,
             "--title",
             f"Apollo {self.args.release_version} Release",
             "--notes-file",
@@ -602,7 +663,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--ref",
-                "master",
+                self.args.target_branch,
                 "-f",
                 f"release_tag=v{self.args.release_version}",
             ],
@@ -709,7 +770,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--ref",
-                "master",
+                self.args.target_branch,
                 "-f",
                 f"version={self.args.release_version}",
             ],
@@ -957,11 +1018,12 @@ class ReleaseFlow:
         branch_name = f"codex/post-release-{self.args.next_snapshot}"
         upstream_remote = self.state["upstream_remote"]
         next_release = self.args.next_snapshot.replace("-SNAPSHOT", "")
+        target_branch = self.args.target_branch
 
         if not self._step_done("post_release_branch_prepared"):
-            self._run_command(["git", "fetch", upstream_remote, "master"], mutate=True, check=True)
+            self._run_command(["git", "fetch", upstream_remote, target_branch], mutate=True, check=True)
             self._run_command(
-                ["git", "checkout", "-B", branch_name, f"{upstream_remote}/master"],
+                ["git", "checkout", "-B", branch_name, f"{upstream_remote}/{target_branch}"],
                 mutate=True,
                 check=True,
             )
@@ -1022,7 +1084,12 @@ class ReleaseFlow:
             self._mark_timestamp("post_release_commit_created_at")
 
         body_path = self.repo_root / ".git" / f"post-release-pr-{next_release}.md"
-        body_path.write_text(self._render_post_release_pr_body(next_release), encoding="utf-8")
+        body_path.write_text(
+            self._render_post_release_pr_body(next_release, target_branch),
+            encoding="utf-8",
+        )
+        self.state["post_release_pr_body_path"] = str(body_path)
+        self._save_state()
 
         self._checkpoint(
             "PUSH_POST_RELEASE_PR",
@@ -1054,7 +1121,7 @@ class ReleaseFlow:
                 "--repo",
                 UPSTREAM_REPO,
                 "--base",
-                "master",
+                self.args.target_branch,
                 "--head",
                 head_ref,
                 "--title",
@@ -1167,7 +1234,7 @@ class ReleaseFlow:
         return int(match.group(1))
 
     @staticmethod
-    def _render_release_pr_body(release_version: str) -> str:
+    def _render_release_pr_body(release_version: str, target_branch: str) -> str:
         return (
             "## What's the purpose of this PR\n\n"
             f"Prepare Apollo {release_version} release by removing `-SNAPSHOT` from root revision.\n\n"
@@ -1176,16 +1243,16 @@ class ReleaseFlow:
             "## Brief changelog\n\n"
             f"- bump version to {release_version}\n\n"
             "Follow this checklist to help us incorporate your contribution quickly and easily:\n\n"
-            "- [x] Read the [Contributing Guide](https://github.com/apolloconfig/apollo/blob/master/CONTRIBUTING.md) before making this pull request.\n"
+            f"- [x] Read the [Contributing Guide](https://github.com/apolloconfig/apollo/blob/{target_branch}/CONTRIBUTING.md) before making this pull request.\n"
             "- [x] Write a pull request description that is detailed enough to understand what the pull request does, how, and why.\n"
             "- [ ] Write necessary unit tests to verify the code.\n"
             "- [ ] Run `mvn clean test` to make sure this pull request doesn't break anything.\n"
             "- [ ] Run `mvn spotless:apply` to format your code.\n"
-            "- [ ] Update the [`CHANGES` log](https://github.com/apolloconfig/apollo/blob/master/CHANGES.md).\n"
+            f"- [ ] Update the [`CHANGES` log](https://github.com/apolloconfig/apollo/blob/{target_branch}/CHANGES.md).\n"
         )
 
     @staticmethod
-    def _render_post_release_pr_body(next_release: str) -> str:
+    def _render_post_release_pr_body(next_release: str, target_branch: str) -> str:
         return (
             "## What's the purpose of this PR\n\n"
             f"Post-release housekeeping for Apollo {next_release}: bump next SNAPSHOT and archive CHANGES.md.\n\n"
@@ -1196,18 +1263,19 @@ class ReleaseFlow:
             "- archive CHANGES.md into changes/\n"
             "- refresh milestone link in CHANGES.md\n\n"
             "Follow this checklist to help us incorporate your contribution quickly and easily:\n\n"
-            "- [x] Read the [Contributing Guide](https://github.com/apolloconfig/apollo/blob/master/CONTRIBUTING.md) before making this pull request.\n"
+            f"- [x] Read the [Contributing Guide](https://github.com/apolloconfig/apollo/blob/{target_branch}/CONTRIBUTING.md) before making this pull request.\n"
             "- [x] Write a pull request description that is detailed enough to understand what the pull request does, how, and why.\n"
             "- [ ] Write necessary unit tests to verify the code.\n"
             "- [ ] Run `mvn clean test` to make sure this pull request doesn't break anything.\n"
             "- [ ] Run `mvn spotless:apply` to format your code.\n"
-            "- [x] Update the [`CHANGES` log](https://github.com/apolloconfig/apollo/blob/master/CHANGES.md).\n"
+            f"- [x] Update the [`CHANGES` log](https://github.com/apolloconfig/apollo/blob/{target_branch}/CHANGES.md).\n"
         )
 
-    def _print_final_report(self) -> None:
+    def _print_final_report(self, cleaned_artifacts: Optional[list[str]] = None) -> None:
         report = {
             "release_version": self.args.release_version,
             "next_snapshot": self.args.next_snapshot,
+            "target_branch": self.args.target_branch,
             "highlight_prs": self.state.get("highlight_prs"),
             "state_file": str(self.state_path),
             "release_pr_url": self.state.get("release_pr_url"),
@@ -1217,6 +1285,7 @@ class ReleaseFlow:
             "announcement_status": self.state.get("announcement_status"),
             "announcement_url": self.state.get("announcement_url"),
             "post_release_pr_url": self.state.get("post_release_pr_url"),
+            "cleaned_temp_artifacts": cleaned_artifacts or [],
         }
         print(json.dumps(report, indent=2, ensure_ascii=True))
 
@@ -1235,6 +1304,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     run.add_argument("--state-file", default=DEFAULT_STATE_FILE)
     run.add_argument("--previous-tag", default=None)
+    run.add_argument(
+        "--target-branch",
+        default="master",
+        help="Target branch used for release PRs, tags, workflows, and post-release PRs",
+    )
     run.add_argument("--confirm-checkpoint", choices=sorted(CHECKPOINTS), default=None)
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--allow-dirty", action="store_true")

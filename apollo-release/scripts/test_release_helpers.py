@@ -254,6 +254,34 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
         self.assertIn("TRIGGER_PACKAGE_WORKFLOW", release_flow.CHECKPOINTS)
         self.assertIn("MANAGE_MILESTONES", release_flow.CHECKPOINTS)
 
+    def test_parse_args_defaults_target_branch_to_master(self) -> None:
+        args = release_flow.parse_args(
+            [
+                "run",
+                "--release-version",
+                "2.5.0",
+                "--next-snapshot",
+                "2.6.0-SNAPSHOT",
+                "--highlight-prs",
+                "5336,5361,5365",
+            ]
+        )
+        self.assertEqual(args.target_branch, "master")
+
+    def test_parse_args_defaults_state_file_under_git(self) -> None:
+        args = release_flow.parse_args(
+            [
+                "run",
+                "--release-version",
+                "2.5.0",
+                "--next-snapshot",
+                "2.6.0-SNAPSHOT",
+                "--highlight-prs",
+                "5336,5361,5365",
+            ]
+        )
+        self.assertEqual(args.state_file, ".git/apollo-release-state.json")
+
     def test_release_flow_requires_highlight_prs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             args = release_flow.parse_args(
@@ -263,6 +291,130 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
                     "2.5.0",
                     "--next-snapshot",
                     "2.6.0-SNAPSHOT",
+                    "--state-file",
+                    "state.json",
+                    "--dry-run",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=Path(tmp)):
+                with self.assertRaises(release_flow.ReleaseFlowError):
+                    ReleaseFlow(args)
+
+    def test_release_flow_persists_custom_target_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.1",
+                    "--next-snapshot",
+                    "2.5.2-SNAPSHOT",
+                    "--highlight-prs",
+                    "5336,5361,5365",
+                    "--target-branch",
+                    "2.x",
+                    "--state-file",
+                    "state.json",
+                    "--dry-run",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=Path(tmp)):
+                flow = ReleaseFlow(args)
+
+            self.assertEqual(flow.state["target_branch"], "2.x")
+
+    def test_cleanup_temp_artifacts_after_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.1",
+                    "--next-snapshot",
+                    "2.5.2-SNAPSHOT",
+                    "--highlight-prs",
+                    "5566",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=Path(tmp)):
+                flow = ReleaseFlow(args)
+
+            temp_files = [
+                flow.state_path,
+                Path(tmp) / ".git/release-pr-2.5.1.md",
+                Path(tmp) / ".git/release-notes-2.5.1.md",
+                Path(tmp) / ".git/announcement-2.5.1.md",
+                Path(tmp) / ".git/post-release-pr-2.5.2.md",
+            ]
+            for path in temp_files:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("temp", encoding="utf-8")
+
+            flow.state.update(
+                {
+                    "announcement_status": "posted",
+                    "release_pr_body_path": str(temp_files[1]),
+                    "release_notes_path": str(temp_files[2]),
+                    "announcement_body_path": str(temp_files[3]),
+                    "post_release_pr_body_path": str(temp_files[4]),
+                }
+            )
+            flow.state.setdefault("steps", {})["post_release_pr_created"] = True
+            flow._save_state()
+
+            cleaned = flow._cleanup_temp_artifacts()
+
+            self.assertEqual(set(cleaned), {str(path.resolve()) for path in temp_files})
+            for path in temp_files:
+                self.assertFalse(path.exists())
+
+    def test_cleanup_temp_artifacts_skipped_when_manual_announcement_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.1",
+                    "--next-snapshot",
+                    "2.5.2-SNAPSHOT",
+                    "--highlight-prs",
+                    "5566",
+                ]
+            )
+            with mock.patch("pathlib.Path.cwd", return_value=Path(tmp)):
+                flow = ReleaseFlow(args)
+
+            release_notes = Path(tmp) / ".git/release-notes-2.5.1.md"
+            release_notes.parent.mkdir(parents=True, exist_ok=True)
+            release_notes.write_text("temp", encoding="utf-8")
+            flow.state.update(
+                {
+                    "announcement_status": "manual_required",
+                    "release_notes_path": str(release_notes),
+                }
+            )
+            flow.state.setdefault("steps", {})["post_release_pr_created"] = True
+            flow._save_state()
+
+            cleaned = flow._cleanup_temp_artifacts()
+
+            self.assertEqual(cleaned, [])
+            self.assertTrue(flow.state_path.exists())
+            self.assertTrue(release_notes.exists())
+
+    def test_release_flow_rejects_invalid_target_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = release_flow.parse_args(
+                [
+                    "run",
+                    "--release-version",
+                    "2.5.1",
+                    "--next-snapshot",
+                    "2.5.2-SNAPSHOT",
+                    "--highlight-prs",
+                    "5336,5361,5365",
+                    "--target-branch",
+                    "release branch",
                     "--state-file",
                     "state.json",
                     "--dry-run",
@@ -315,6 +467,16 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
                     ]
                 ),
             )
+
+    def test_render_release_pr_body_uses_target_branch_links(self) -> None:
+        body = ReleaseFlow._render_release_pr_body("2.5.1", "2.x")
+        self.assertIn("/blob/2.x/CONTRIBUTING.md", body)
+        self.assertIn("/blob/2.x/CHANGES.md", body)
+
+    def test_render_post_release_pr_body_uses_target_branch_links(self) -> None:
+        body = ReleaseFlow._render_post_release_pr_body("2.5.2", "2.x")
+        self.assertIn("/blob/2.x/CONTRIBUTING.md", body)
+        self.assertIn("/blob/2.x/CHANGES.md", body)
 
     def test_render_announcement_from_release_notes(self) -> None:
         release_notes = """## Highlights
