@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import argparse
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -304,6 +307,25 @@ handoff:
             candidate["activity_signature"],
         )
         self.assertFalse(cr.has_new_external_activity(candidate, "2026-03-15T00:00:00Z"))
+
+    def test_main_returns_handler_exit_code(self):
+        parser = Mock()
+        parser.parse_args.return_value = argparse.Namespace(func=lambda args: 7)
+        with patch.object(cr, "build_parser", return_value=parser):
+            self.assertEqual(7, cr.main(["scan"]))
+
+    def test_main_returns_one_and_logs_error_on_exception(self):
+        def boom(args):
+            raise RuntimeError("boom")
+
+        parser = Mock()
+        parser.parse_args.return_value = argparse.Namespace(func=boom)
+        stderr = io.StringIO()
+        with patch.object(cr, "build_parser", return_value=parser), redirect_stderr(stderr):
+            exit_code = cr.main(["scan"])
+
+        self.assertEqual(1, exit_code)
+        self.assertIn("Error: boom", stderr.getvalue())
 
 
 if __name__ == "__main__":
