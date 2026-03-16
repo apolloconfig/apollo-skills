@@ -901,20 +901,6 @@ def checkout_pr_head(repo: str, mirror_dir: Path, pr_number: int) -> dict[str, A
     return {"branch": branch_name, "mirror_dir": str(mirror_dir), "repo": repo}
 
 
-def post_comment(repo: str, number: int, body: str, *, dry_run: bool = False) -> dict[str, Any]:
-    if dry_run:
-        return {
-            "body": body,
-            "html_url": f"https://github.com/{repo}/issues/{number}#dry-run",
-        }
-    response = gh_api_json(
-        gh_repo_endpoint(repo, f"issues/{number}/comments"),
-    )
-    raise RuntimeError(
-        "direct POST via gh api requires form fields; use post-comment CLI command with body handling"
-    )
-
-
 def post_comment_via_cli(repo: str, number: int, body: str, *, dry_run: bool) -> dict[str, Any]:
     if dry_run:
         return {
@@ -1054,7 +1040,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    args.func(args)
+    try:
+        result = args.func(args)
+    except Exception as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    if isinstance(result, int):
+        return result
     return 0
 
 
