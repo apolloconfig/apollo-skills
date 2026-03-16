@@ -1,0 +1,50 @@
+Issue Summary
+- issue type + confidence: 功能咨询 / high
+- validation result: evidence result
+
+Triage Suggestion
+- labels to add: discussion, kind/question
+- missing information: none
+- ready for implementation handoff: false
+
+Draft Maintainer Reply
+结论：当前 Apollo 仓库里没有单独维护一份可以直接对外引用的 OpenAPI 文档页面。
+
+当前能力与边界：
+- Portal Web API 和 OpenAPI 是两套接口，不建议直接把 Portal 接口当成 OpenAPI 使用。
+
+可行方案：
+- 如果你需要确认具体 OpenAPI 能力，建议以 `apollo-openapi` 规范和 `/openapi/v1/*` 路径为准。
+
+后续路径：
+- 如果你希望补齐文档入口，可以提一个文档增强 PR，我们可以继续跟进。
+
+COMMUNITY_REVIEW_DECISION
+```json
+{
+  "language": "zh",
+  "decision_confidence": "high",
+  "recommended_action": "comment",
+  "validation_completed": true,
+  "missing_info_fields": [],
+  "blocking": false,
+  "blocking_reasons": [],
+  "draft_body": "结论：当前 Apollo 仓库里没有单独维护一份可以直接对外引用的 OpenAPI 文档页面。\n\n当前能力与边界：\n- Portal Web API 和 OpenAPI 是两套接口，不建议直接把 Portal 接口当成 OpenAPI 使用。\n\n可行方案：\n- 如果你需要确认具体 OpenAPI 能力，建议以 `apollo-openapi` 规范和 `/openapi/v1/*` 路径为准。\n\n后续路径：\n- 如果你希望补齐文档入口，可以提一个文档增强 PR，我们可以继续跟进。"
+}
+```
+
+handoff:
+  issue_classification:
+    type: "功能咨询"
+    validation_path: "consultative-support"
+    confidence: "high"
+  triage_decision:
+    labels_to_add: []
+    missing_info_fields: []
+    ready_for_issue_to_pr: false
+    ready_reason: ""
+  implementation_handoff:
+    goal: ""
+    acceptance_criteria: []
+    suggested_modules: []
+    risk_hints: []

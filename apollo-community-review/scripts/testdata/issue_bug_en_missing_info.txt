@@ -1,0 +1,51 @@
+Issue Summary
+- issue type + confidence: Bug 反馈 / medium
+- validation result: not reproduced
+
+Triage Suggestion
+- labels to add: bug, status/need-feedback
+- missing information: input sample, expected vs actual output
+- ready for implementation handoff: false
+
+Draft Maintainer Reply
+Not yet reproduced.
+
+Please share the minimum details below so we can continue:
+1. A minimal request payload
+2. The exact read/publish code path you are calling
+3. Expected behavior vs actual behavior
+
+COMMUNITY_REVIEW_DECISION
+```json
+{
+  "language": "en",
+  "decision_confidence": "medium",
+  "recommended_action": "comment",
+  "validation_completed": true,
+  "missing_info_fields": [
+    "input sample",
+    "expected vs actual output"
+  ],
+  "blocking": false,
+  "blocking_reasons": [],
+  "draft_body": "Not yet reproduced.\n\nPlease share the minimum details below so we can continue:\n1. A minimal request payload\n2. The exact read/publish code path you are calling\n3. Expected behavior vs actual behavior"
+}
+```
+
+handoff:
+  issue_classification:
+    type: "Bug 反馈"
+    validation_path: "behavior-regression"
+    confidence: "medium"
+  triage_decision:
+    labels_to_add: []
+    missing_info_fields:
+      - "input sample"
+      - "expected vs actual output"
+    ready_for_issue_to_pr: false
+    ready_reason: ""
+  implementation_handoff:
+    goal: ""
+    acceptance_criteria: []
+    suggested_modules: []
+    risk_hints: []
