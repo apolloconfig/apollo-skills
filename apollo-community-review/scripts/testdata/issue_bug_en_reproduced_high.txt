@@ -1,0 +1,50 @@
+Issue Summary
+- issue type + confidence: Bug 反馈 / high
+- validation result: reproduced
+
+Triage Suggestion
+- labels to add: bug
+- missing information: none
+- ready for implementation handoff: true
+
+Draft Maintainer Reply
+Reproduced on current `master`.
+
+Current Support Boundary:
+- The request reaches `apollo-adminservice`, but the current error handling still returns a generic 500 for this validation path.
+
+Practical Path:
+- We can narrow this to the namespace publish flow and return a clearer `BadRequest` instead of a generic 500.
+
+Next Step:
+- If you can share the exact input payload we can match it with a focused regression test, but the failure itself is already confirmed.
+
+COMMUNITY_REVIEW_DECISION
+```json
+{
+  "language": "en",
+  "decision_confidence": "high",
+  "recommended_action": "comment",
+  "validation_completed": true,
+  "missing_info_fields": [],
+  "blocking": false,
+  "blocking_reasons": [],
+  "draft_body": "Reproduced on current `master`.\n\nCurrent Support Boundary:\n- The request reaches `apollo-adminservice`, but the current error handling still returns a generic 500 for this validation path.\n\nPractical Path:\n- We can narrow this to the namespace publish flow and return a clearer `BadRequest` instead of a generic 500.\n\nNext Step:\n- If you can share the exact input payload we can match it with a focused regression test, but the failure itself is already confirmed."
+}
+```
+
+handoff:
+  issue_classification:
+    type: "Bug 反馈"
+    validation_path: "behavior-regression"
+    confidence: "high"
+  triage_decision:
+    labels_to_add: []
+    missing_info_fields: []
+    ready_for_issue_to_pr: true
+    ready_reason: "confirmed reproduction"
+  implementation_handoff:
+    goal: ""
+    acceptance_criteria: []
+    suggested_modules: []
+    risk_hints: []

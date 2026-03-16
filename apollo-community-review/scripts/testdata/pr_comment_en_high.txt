@@ -1,0 +1,49 @@
+Review Decision
+- recommended action: comment
+- blocking: false
+- confidence: high
+
+Findings
+- no blocking findings
+
+Risk and Gate Status
+- required checks summary: clean
+- residual risks: none
+
+Publish-ready Maintainer Review Draft
+The change looks aligned with the linked issue and the validation path now behaves consistently across the updated entry points.
+
+One follow-up suggestion: please mention the added regression coverage in the PR description so future reviewers can spot the intended contract more quickly.
+
+COMMUNITY_REVIEW_DECISION
+```json
+{
+  "language": "en",
+  "decision_confidence": "high",
+  "recommended_action": "comment",
+  "validation_completed": true,
+  "missing_info_fields": [],
+  "blocking": false,
+  "blocking_reasons": [],
+  "draft_body": "The change looks aligned with the linked issue and the validation path now behaves consistently across the updated entry points.\n\nOne follow-up suggestion: please mention the added regression coverage in the PR description so future reviewers can spot the intended contract more quickly."
+}
+```
+
+handoff:
+  review_decision:
+    action: "comment"
+    blocking: false
+    decision_confidence: "high"
+  findings: []
+  contract_check:
+    goal_match: "pass"
+    acceptance_criteria_status: []
+    non_goal_violations: []
+  issue_coverage:
+    linked_issue: true
+    verdict: "full"
+    scenarios: []
+  gate_status:
+    required_checks: []
+    residual_risks: []
+    merge_preconditions: []

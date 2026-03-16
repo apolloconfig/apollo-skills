@@ -1,0 +1,51 @@
+Review Decision
+- recommended action: request changes
+- blocking: true
+- confidence: high
+
+Findings
+- P2: 缺少边界条件测试
+
+Publish-ready Maintainer Review Draft
+当前实现还缺少一个阻塞项：公共校验路径只补了 portal 入口，没有覆盖 adminservice 的同类入口，这会导致同一类问题在另一个入口继续存在。
+
+请修复以下阻塞项后再更新：
+1. 为 adminservice 对应入口补齐相同校验。
+2. 增加覆盖该入口的回归测试。
+
+COMMUNITY_REVIEW_DECISION
+```json
+{
+  "language": "zh",
+  "decision_confidence": "high",
+  "recommended_action": "request changes",
+  "validation_completed": true,
+  "missing_info_fields": [],
+  "blocking": true,
+  "blocking_reasons": [
+    "shared validator gap remains"
+  ],
+  "draft_body": "当前实现还缺少一个阻塞项：公共校验路径只补了 portal 入口，没有覆盖 adminservice 的同类入口，这会导致同一类问题在另一个入口继续存在。\n\n请修复以下阻塞项后再更新：\n1. 为 adminservice 对应入口补齐相同校验。\n2. 增加覆盖该入口的回归测试。"
+}
+```
+
+handoff:
+  review_decision:
+    action: "request changes"
+    blocking: true
+    decision_confidence: "high"
+  findings:
+    - "shared validator gap remains"
+  contract_check:
+    goal_match: "partial"
+    acceptance_criteria_status: []
+    non_goal_violations: []
+  issue_coverage:
+    linked_issue: true
+    verdict: "partial"
+    scenarios: []
+  gate_status:
+    required_checks: []
+    residual_risks:
+      - "shared validator gap remains"
+    merge_preconditions: []
