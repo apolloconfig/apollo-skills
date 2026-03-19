@@ -26,7 +26,9 @@ ENGLISH_DISCLAIMER = (
 )
 
 DEFAULT_REPO = "apolloconfig/apollo"
-DEFAULT_STATE_FILE = Path.home() / ".codex" / "tmp" / "apollo-community-review" / "state.json"
+ACTOR_ENV_VAR = "APOLLO_COMMUNITY_REVIEW_ACTOR"
+DEFAULT_STATE_ROOT = Path.home() / ".codex" / "tmp" / "apollo-community-review"
+DEFAULT_STATE_FILE = DEFAULT_STATE_ROOT / "state.json"
 DEFAULT_MIRROR_DIR = Path.home() / ".codex" / "tmp" / "apollo-review-mirror"
 READY_CHECK_CONCLUSIONS = {"success", "neutral", "skipped"}
 KNOWN_AUTOMATION_LOGINS = {
@@ -93,6 +95,41 @@ def gh_api_json(endpoint: str, *, paginate: bool = False) -> Any:
                 flattened.append(page)
         return flattened
     return payload
+
+
+def detect_github_login() -> str:
+    return run_command(["gh", "api", "user", "--jq", ".login"]).strip()
+
+
+def resolve_actor_login(actor: str | None) -> str:
+    explicit = (actor or "").strip()
+    if explicit:
+        return explicit
+    env_actor = os.environ.get(ACTOR_ENV_VAR, "").strip()
+    if env_actor:
+        return env_actor
+    detected = detect_github_login().strip()
+    if detected:
+        return detected
+    raise RuntimeError(
+        "unable to resolve GitHub actor; pass --actor or set APOLLO_COMMUNITY_REVIEW_ACTOR"
+    )
+
+
+def resolve_state_path(state_file: str | None, actor: str | None = None) -> Path:
+    if state_file:
+        return Path(state_file).expanduser()
+    normalized_actor = (actor or "").strip()
+    if normalized_actor:
+        return DEFAULT_STATE_ROOT / normalized_actor / "state.json"
+    return DEFAULT_STATE_FILE
+
+
+def resolve_maintainers(raw: str | None, actor: str) -> set[str]:
+    maintainers = maintainer_set((raw or "").split(","))
+    if maintainers:
+        return maintainers
+    return {actor.strip().lower()}
 
 
 def gh_repo_endpoint(repo: str, path: str, params: dict[str, Any] | None = None) -> str:
@@ -919,11 +956,13 @@ def post_comment_via_cli(repo: str, number: int, body: str, *, dry_run: bool) ->
 
 
 def command_scan(args: argparse.Namespace) -> None:
-    state = load_state(Path(args.state_file).expanduser())
-    maintainers = maintainer_set(args.maintainers.split(","))
+    actor = resolve_actor_login(args.actor)
+    state_path = resolve_state_path(args.state_file, actor)
+    state = load_state(state_path)
+    maintainers = resolve_maintainers(args.maintainers, actor)
     candidates = discover_candidates(
         args.repo,
-        actor_login=args.actor,
+        actor_login=actor,
         maintainers=maintainers,
         state=state,
         initial_lookback_hours=args.initial_lookback_hours,
@@ -961,10 +1000,10 @@ def command_post_comment(args: argparse.Namespace) -> None:
 
 
 def command_mark_processed(args: argparse.Namespace) -> None:
-    state_path = Path(args.state_file).expanduser()
-    state = load_state(state_path)
     candidate = parse_json_file(Path(args.candidate_file))
     decision = parse_json_file(Path(args.decision_file))
+    state_path = resolve_state_path(args.state_file, candidate.get("viewer_actor"))
+    state = load_state(state_path)
     updated = mark_processed(state, candidate, decision)
     save_state(state_path, updated)
     print(json.dumps(updated, indent=2))
@@ -1001,10 +1040,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan_parser = subparsers.add_parser("scan")
     scan_parser.add_argument("--repo", default=DEFAULT_REPO)
-    scan_parser.add_argument("--actor", required=True)
-    scan_parser.add_argument("--maintainers", required=True)
+    scan_parser.add_argument("--actor")
+    scan_parser.add_argument("--maintainers")
     scan_parser.add_argument("--initial-lookback-hours", type=int, default=4)
-    scan_parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE))
+    scan_parser.add_argument("--state-file")
     scan_parser.set_defaults(func=command_scan)
 
     fetch_parser = subparsers.add_parser("fetch-thread")
@@ -1025,7 +1064,7 @@ def build_parser() -> argparse.ArgumentParser:
     post_parser.set_defaults(func=command_post_comment)
 
     mark_parser = subparsers.add_parser("mark-processed")
-    mark_parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE))
+    mark_parser.add_argument("--state-file")
     mark_parser.add_argument("--candidate-file", required=True)
     mark_parser.add_argument("--decision-file", required=True)
     mark_parser.set_defaults(func=command_mark_processed)

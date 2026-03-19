@@ -208,7 +208,7 @@ handoff:
         self.assertIn("Please rerun the failing build.", summary)
 
     def test_mark_processed_persists_state_schema(self):
-        candidate = issue_candidate()
+        candidate = issue_candidate(viewer_actor="carol")
         decision = cr.build_decision(candidate, fixture("issue_consultative_zh_high.txt"))
         with tempfile.TemporaryDirectory() as temp_dir:
             state_file = Path(temp_dir) / "state.json"
@@ -217,6 +217,26 @@ handoff:
             persisted = json.loads(state_file.read_text())
             self.assertIn("threads", persisted)
             self.assertIn(cr.state_key(candidate), persisted["threads"])
+
+    def test_resolve_actor_login_prefers_explicit_then_env_then_gh(self):
+        with patch.object(cr, "detect_github_login", return_value="from-gh"):
+            self.assertEqual("explicit", cr.resolve_actor_login("explicit"))
+        with patch.dict(cr.os.environ, {cr.ACTOR_ENV_VAR: "from-env"}, clear=False), patch.object(
+            cr, "detect_github_login", return_value="from-gh"
+        ):
+            self.assertEqual("from-env", cr.resolve_actor_login(None))
+        with patch.dict(cr.os.environ, {}, clear=True), patch.object(
+            cr, "detect_github_login", return_value="from-gh"
+        ):
+            self.assertEqual("from-gh", cr.resolve_actor_login(None))
+
+    def test_resolve_state_path_defaults_to_actor_scoped_file(self):
+        path = cr.resolve_state_path(None, "carol")
+        self.assertTrue(str(path).endswith("apollo-community-review/carol/state.json"))
+
+    def test_resolve_maintainers_falls_back_to_actor(self):
+        self.assertEqual({"carol"}, cr.resolve_maintainers(None, "carol"))
+        self.assertEqual({"alice", "bob"}, cr.resolve_maintainers("alice,bob", "carol"))
 
     def test_issue_candidate_ignores_stale_bot_only_activity(self):
         issue = {

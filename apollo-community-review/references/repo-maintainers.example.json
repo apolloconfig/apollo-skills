@@ -1,0 +1,33 @@
+{
+  "defaultMaintainers": [],
+  "repoMaintainers": {
+    "apolloconfig/apollo": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/apollo-java": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/apollo-helm-chart": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/apollo-quick-start": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/agollo": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/apollo.net": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ],
+    "apolloconfig/apollo-openapi": [
+      "<maintainer-login-1>",
+      "<maintainer-login-2>"
+    ]
+  }
+}

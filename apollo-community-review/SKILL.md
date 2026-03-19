@@ -24,11 +24,14 @@ Path notes:
 ## Defaults
 
 - repo: `apolloconfig/apollo`
-- actor: `nobodyiam`
-- maintainers: `nobodyiam`
+- actor: resolve in this order: `--actor` → `APOLLO_COMMUNITY_REVIEW_ACTOR` → current `gh auth` login
+- maintainers: prefer `--maintainers` / `repoMaintainers`; otherwise fall back to the resolved actor
 - mirror dir: `~/.codex/tmp/apollo-review-mirror`
-- state file: `~/.codex/tmp/apollo-community-review/state.json`
+- state file: if not passed explicitly, default to `~/.codex/tmp/apollo-community-review/<actor>/state.json`
 - default branch: `master`
+- shared org policy: `$SKILL_ROOT/references/repo-policy.json`
+- optional shared maintainer map: `--maintainers-file /path/to/repo-maintainers.json` (see `$SKILL_ROOT/references/repo-maintainers.example.json`)
+- optional local operator override: `--operator-file /path/to/operator-config.json` (see `$SKILL_ROOT/references/operator-config.example.json`)
 
 ## Workflow
 
@@ -42,15 +45,26 @@ python3 "$SKILL_ROOT/scripts/community_review.py" \
 ```
 
 2. Discover candidates:
+- Single-repo scan (legacy / focused mode):
 ```bash
 python3 "$SKILL_ROOT/scripts/community_review.py" \
   scan \
   --repo apolloconfig/apollo \
-  --actor nobodyiam \
-  --maintainers nobodyiam \
-  --state-file ~/.codex/tmp/apollo-community-review/state.json \
+  --actor <github-login> \
+  --maintainers <comma-separated-maintainers> \
+  --state-file ~/.codex/tmp/apollo-community-review/<github-login>/state.json \
   --initial-lookback-hours 4
 ```
+If `--actor` is omitted, the helper resolves it from `APOLLO_COMMUNITY_REVIEW_ACTOR` or the current `gh auth` login. If `--maintainers` is omitted, it falls back to the resolved actor.
+- Org-level scan (preferred for scheduled Apollo maintenance):
+```bash
+python3 "$SKILL_ROOT/scripts/scan_org.py" \
+  --policy-file "$SKILL_ROOT/references/repo-policy.json" \
+  --maintainers-file /path/to/repo-maintainers.json \
+  --operator-file /path/to/operator-config.json \
+  --initial-lookback-hours 4
+```
+This enumerates accessible `apolloconfig` repositories, skips archived / disabled repos, keeps the configured priority repo order first, and returns a flat candidate list plus per-repo scan results/errors. Use `repo-maintainers.json` for the shared repo→maintainer map and `operator-config.json` only for local actor overrides so the shared skill does not hardcode a specific maintainer identity.
 
 3. For each candidate:
 - Fetch thread context with `fetch-thread`.
@@ -102,10 +116,11 @@ python3 "$SKILL_ROOT/scripts/community_review.py" \
 ```bash
 python3 "$SKILL_ROOT/scripts/community_review.py" \
   mark-processed \
-  --state-file ~/.codex/tmp/apollo-community-review/state.json \
+  --state-file ~/.codex/tmp/apollo-community-review/<github-login>/state.json \
   --candidate-file <candidate_json> \
   --decision-file <decision_json>
 ```
+If `--state-file` is omitted, `mark-processed` reuses the actor-scoped default derived from the candidate metadata.
 
 6. At the end of the run, summarize all results:
 ```bash

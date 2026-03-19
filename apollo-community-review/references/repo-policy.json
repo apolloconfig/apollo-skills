@@ -1,0 +1,34 @@
+{
+  "org": "apolloconfig",
+  "stateFile": "~/.codex/tmp/apollo-community-review/<actor>/state.json",
+  "mirrorRoot": "~/.codex/tmp/apollo-community-review/<actor>/mirrors",
+  "defaultMaintainers": [],
+  "excludeRepoPrefixes": [
+    "apolloconfig/apollo-ghsa-"
+  ],
+  "priorityRepos": [
+    "apolloconfig/apollo",
+    "apolloconfig/apollo-java",
+    "apolloconfig/apollo-helm-chart",
+    "apolloconfig/apollo-quick-start",
+    "apolloconfig/agollo",
+    "apolloconfig/apollo.net",
+    "apolloconfig/apollo-openapi"
+  ],
+  "repoMaintainers": {},
+  "ignoredBots": [
+    "stale",
+    "stale[bot]",
+    "mergify",
+    "mergify[bot]",
+    "dependabot",
+    "dependabot[bot]",
+    "app/dependabot",
+    "copilot",
+    "app/copilot-swe-agent",
+    "copilot-pull-request-reviewer",
+    "coderabbitai",
+    "codecov",
+    "apollo-bot"
+  ]
+}
