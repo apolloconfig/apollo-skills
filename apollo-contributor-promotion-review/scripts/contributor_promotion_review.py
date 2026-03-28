@@ -210,10 +210,15 @@ def normalize_login(login: str | None, aliases: dict[str, str] | None = None) ->
     normalized = (login or "").strip().lstrip("@").lower()
     if not normalized:
         return ""
-    if aliases and normalized in aliases:
+    seen: set[str] = set()
+    while aliases and normalized in aliases:
+        if normalized in seen:
+            break
+        seen.add(normalized)
         target = aliases[normalized].strip().lstrip("@").lower()
-        if target and target != normalized:
-            return normalize_login(target, aliases)
+        if not target or target == normalized:
+            break
+        normalized = target
     return normalized
 
 
@@ -316,6 +321,13 @@ def parse_repo_name_from_url(repo_url: str | None) -> str:
     if len(parts) < 2:
         return ""
     return f"{parts[-2]}/{parts[-1]}"
+
+
+def occurred_at_or_after(timestamp: str | None, cutoff: datetime) -> bool:
+    occurred_at = iso_to_datetime(timestamp)
+    if occurred_at is None:
+        return False
+    return occurred_at >= cutoff
 
 
 def load_json_file(path: Path) -> dict[str, Any]:
@@ -681,6 +693,7 @@ def aggregate_recent_activity(
     policy: dict[str, Any],
     ignored_logins: set[str],
     aliases: dict[str, str],
+    cutoff: datetime,
 ) -> dict[str, dict[str, Any]]:
     weights = policy["scoreWeights"]
     contributors: dict[str, dict[str, Any]] = {}
@@ -691,21 +704,41 @@ def aggregate_recent_activity(
             continue
         title = pr.get("title") or f"PR #{pr.get('number')}"
         author = normalize_login(pr.get("author", {}).get("login"), aliases)
+        merged_at = pr.get("mergedAt")
+        last_pr_activity = pr.get("updatedAt") or pr.get("createdAt")
         if is_human_login(author, ignored_logins, aliases):
-            kind = "merged_pr" if pr.get("mergedAt") else "open_pr"
-            record_recent_activity(
-                contributors,
-                login=author,
-                kind=kind,
-                repo=repo,
-                url=pr.get("url") or "",
-                title=title,
-                occurred_at=pr.get("mergedAt") or pr.get("updatedAt") or pr.get("createdAt"),
-                score=weights[kind],
-            )
+            if occurred_at_or_after(merged_at, cutoff):
+                record_recent_activity(
+                    contributors,
+                    login=author,
+                    kind="merged_pr",
+                    repo=repo,
+                    url=pr.get("url") or "",
+                    title=title,
+                    occurred_at=merged_at,
+                    score=weights["merged_pr"],
+                )
+            elif (
+                pr.get("state") == "OPEN"
+                and not pr.get("isDraft")
+                and occurred_at_or_after(last_pr_activity, cutoff)
+            ):
+                record_recent_activity(
+                    contributors,
+                    login=author,
+                    kind="open_pr",
+                    repo=repo,
+                    url=pr.get("url") or "",
+                    title=title,
+                    occurred_at=last_pr_activity,
+                    score=weights["open_pr"],
+                )
         for review in pr.get("reviews", {}).get("nodes", []):
             reviewer = normalize_login(review.get("author", {}).get("login"), aliases)
             if not is_human_login(reviewer, ignored_logins, aliases) or reviewer == author:
+                continue
+            submitted_at = review.get("submittedAt")
+            if not occurred_at_or_after(submitted_at, cutoff):
                 continue
             record_recent_activity(
                 contributors,
@@ -714,12 +747,15 @@ def aggregate_recent_activity(
                 repo=repo,
                 url=review.get("url") or "",
                 title=title,
-                occurred_at=review.get("submittedAt"),
+                occurred_at=submitted_at,
                 score=weights["review"],
             )
         for comment in pr.get("comments", {}).get("nodes", []):
             commenter = normalize_login(comment.get("author", {}).get("login"), aliases)
             if not is_human_login(commenter, ignored_logins, aliases) or commenter == author:
+                continue
+            created_at = comment.get("createdAt")
+            if not occurred_at_or_after(created_at, cutoff):
                 continue
             record_recent_activity(
                 contributors,
@@ -728,7 +764,7 @@ def aggregate_recent_activity(
                 repo=repo,
                 url=comment.get("url") or "",
                 title=title,
-                occurred_at=comment.get("createdAt"),
+                occurred_at=created_at,
                 score=weights["pr_comment"],
             )
 
@@ -742,6 +778,9 @@ def aggregate_recent_activity(
             commenter = normalize_login(comment.get("author", {}).get("login"), aliases)
             if not is_human_login(commenter, ignored_logins, aliases) or commenter == author:
                 continue
+            created_at = comment.get("createdAt")
+            if not occurred_at_or_after(created_at, cutoff):
+                continue
             record_recent_activity(
                 contributors,
                 login=commenter,
@@ -749,7 +788,7 @@ def aggregate_recent_activity(
                 repo=repo,
                 url=comment.get("url") or "",
                 title=title,
-                occurred_at=comment.get("createdAt"),
+                occurred_at=created_at,
                 score=weights["issue_comment"],
             )
 
@@ -763,6 +802,9 @@ def aggregate_recent_activity(
                 commenter = normalize_login(comment.get("author", {}).get("login"), aliases)
                 if not is_human_login(commenter, ignored_logins, aliases) or commenter == author:
                     continue
+                created_at = comment.get("createdAt")
+                if not occurred_at_or_after(created_at, cutoff):
+                    continue
                 record_recent_activity(
                     contributors,
                     login=commenter,
@@ -770,7 +812,7 @@ def aggregate_recent_activity(
                     repo=repo,
                     url=comment.get("url") or "",
                     title=title,
-                    occurred_at=comment.get("createdAt"),
+                    occurred_at=created_at,
                     score=0,
                 )
 
@@ -1134,6 +1176,7 @@ def scan_contributors(policy: dict[str, Any], overrides: dict[str, Any], *, incl
         policy=policy,
         ignored_logins=ignored_logins,
         aliases=aliases,
+        cutoff=cutoff,
     )
     ranked = finalize_recent_contributors(contributors, policy)[: int(policy["topN"])]
     thresholds = policy["thresholds"]
@@ -1155,6 +1198,7 @@ def scan_contributors(policy: dict[str, Any], overrides: dict[str, Any], *, incl
         "windowEnd": generated_at.date().isoformat(),
         "org": policy["org"],
         "lookbackDays": int(policy["lookbackDays"]),
+        "topN": int(policy["topN"]),
         "reposScanned": repos_scanned,
         "excludedRepos": excluded_repos,
         "rankedContributors": ranked,
@@ -1237,6 +1281,7 @@ def render_group(title: str, contributors: list[dict[str, Any]]) -> list[str]:
 
 
 def render_summary(payload: dict[str, Any]) -> str:
+    top_n = int(payload.get("topN") or len(payload.get("rankedContributors", [])) or 5)
     lines = [
         "# Apollo Contributor Promotion Review",
         "",
@@ -1245,7 +1290,7 @@ def render_summary(payload: dict[str, Any]) -> str:
         f"- Organization: {payload['org']}",
         f"- Repositories scanned: {len(payload['reposScanned'])}",
         "",
-        "## Top 5 Recent Contributors",
+        f"## Top {top_n} Recent Contributors",
         "",
     ]
     for contributor in payload.get("rankedContributors", []):

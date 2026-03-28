@@ -35,7 +35,7 @@ Path notes:
 python3 "$SKILL_ROOT/scripts/contributor_promotion_review.py" \
   scan \
   --policy-file "$SKILL_ROOT/references/review-policy.example.json" \
-  --pretty
+  --pretty > /path/to/scan.json
 ```
 
 3. Render the internal report.

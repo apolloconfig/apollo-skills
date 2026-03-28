@@ -12,6 +12,13 @@ import contributor_promotion_review as cpr
 
 
 class ContributorPromotionReviewTest(unittest.TestCase):
+    def test_normalize_login_breaks_alias_cycle(self):
+        aliases = {"alice": "bob", "bob": "alice"}
+
+        normalized = cpr.normalize_login("alice", aliases)
+
+        self.assertEqual("alice", normalized)
+
     def test_parse_team_roles_distinguishes_pmcs_and_committers(self):
         markdown = """
 ### Project Management Committee(PMC)
@@ -162,6 +169,7 @@ class ContributorPromotionReviewTest(unittest.TestCase):
             policy=policy,
             ignored_logins=set(),
             aliases={},
+            cutoff=cpr.iso_to_datetime("2026-03-01T00:00:00Z"),
         )
         ranked = cpr.finalize_recent_contributors(contributors, {"scoreWeights": policy["scoreWeights"], "maxRepoBonus": 6})
         alice = next(item for item in ranked if item["login"] == "alice")
@@ -176,6 +184,105 @@ class ContributorPromotionReviewTest(unittest.TestCase):
         self.assertEqual(1, bob["recentBreakdown"]["issueComments"])
         self.assertEqual(1, carol["recentScore"])
         self.assertEqual(1, carol["recentBreakdown"]["prComments"])
+
+    def test_recent_aggregation_ignores_events_outside_cutoff(self):
+        policy = {
+            "scoreWeights": {
+                "merged_pr": 8,
+                "open_pr": 4,
+                "review": 3,
+                "pr_comment": 1,
+                "issue_comment": 1,
+                "extra_repo_bonus": 2,
+            }
+        }
+        cutoff = cpr.iso_to_datetime("2026-03-01T00:00:00Z")
+        pr_nodes = [
+            {
+                "title": "Old merged PR with a new comment",
+                "url": "https://example/pr/10",
+                "isDraft": False,
+                "state": "MERGED",
+                "mergedAt": "2026-01-10T00:00:00Z",
+                "updatedAt": "2026-03-15T00:00:00Z",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "repository": {"nameWithOwner": "apolloconfig/apollo"},
+                "author": {"login": "alice"},
+                "reviews": {
+                    "nodes": [
+                        {
+                            "url": "https://example/pr/10/reviews/1",
+                            "submittedAt": "2026-01-11T00:00:00Z",
+                            "author": {"login": "bob"},
+                        }
+                    ]
+                },
+                "comments": {
+                    "nodes": [
+                        {
+                            "url": "https://example/pr/10/comments/1",
+                            "createdAt": "2026-03-15T01:00:00Z",
+                            "author": {"login": "carol"},
+                        }
+                    ]
+                },
+            },
+            {
+                "title": "Recently updated open PR",
+                "url": "https://example/pr/11",
+                "isDraft": False,
+                "state": "OPEN",
+                "mergedAt": None,
+                "updatedAt": "2026-03-16T00:00:00Z",
+                "createdAt": "2026-02-20T00:00:00Z",
+                "repository": {"nameWithOwner": "apolloconfig/apollo-java"},
+                "author": {"login": "dave"},
+                "reviews": {"nodes": []},
+                "comments": {"nodes": []},
+            },
+        ]
+        issue_nodes = [
+            {
+                "title": "Old issue with old and new comments",
+                "url": "https://example/issues/20",
+                "repository": {"nameWithOwner": "apolloconfig/apollo"},
+                "author": {"login": "erin"},
+                "comments": {
+                    "nodes": [
+                        {
+                            "url": "https://example/issues/20/comments/1",
+                            "createdAt": "2026-02-01T00:00:00Z",
+                            "author": {"login": "frank"},
+                        },
+                        {
+                            "url": "https://example/issues/20/comments/2",
+                            "createdAt": "2026-03-17T00:00:00Z",
+                            "author": {"login": "grace"},
+                        },
+                    ]
+                },
+            }
+        ]
+
+        contributors = cpr.aggregate_recent_activity(
+            pr_nodes=pr_nodes,
+            issue_nodes=issue_nodes,
+            discussion_nodes_by_repo={},
+            allowed_repos={"apolloconfig/apollo", "apolloconfig/apollo-java"},
+            policy=policy,
+            ignored_logins=set(),
+            aliases={},
+            cutoff=cutoff,
+        )
+        ranked = cpr.finalize_recent_contributors(contributors, {"scoreWeights": policy["scoreWeights"], "maxRepoBonus": 6})
+
+        ranked_by_login = {item["login"]: item for item in ranked}
+        self.assertNotIn("alice", ranked_by_login)
+        self.assertNotIn("bob", ranked_by_login)
+        self.assertEqual(1, ranked_by_login["carol"]["recentBreakdown"]["prComments"])
+        self.assertEqual(4, ranked_by_login["dave"]["recentScore"])
+        self.assertEqual(1, ranked_by_login["grace"]["recentBreakdown"]["issueComments"])
+        self.assertNotIn("frank", ranked_by_login)
 
     def test_build_recommendation_prefers_committer_discussion_for_qualified_member(self):
         contributor = {
@@ -263,6 +370,7 @@ class ContributorPromotionReviewTest(unittest.TestCase):
             "windowStart": "2025-12-18",
             "windowEnd": "2026-03-28",
             "org": "apolloconfig",
+            "topN": 3,
             "reposScanned": ["apolloconfig/apollo"],
             "rankedContributors": [
                 {
@@ -331,7 +439,7 @@ class ContributorPromotionReviewTest(unittest.TestCase):
 
         summary = cpr.render_summary(payload)
 
-        self.assertIn("## Top 5 Recent Contributors", summary)
+        self.assertIn("## Top 3 Recent Contributors", summary)
         self.assertIn("## Recommend Member", summary)
         self.assertIn("## Recommend Committer Discussion", summary)
         self.assertIn("## Recommend PMC Discussion", summary)
