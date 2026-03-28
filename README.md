@@ -6,6 +6,7 @@ Maintainer skills and workflows for semi-automated Apollo community operations:
 - issue-to-PR
 - PR review
 - periodic community review automation
+- contributor promotion review
 - server release orchestration
 - Java client release orchestration
 - helm chart release orchestration
@@ -56,7 +57,16 @@ Run Apollo Java formal release flow with checkpoint-gated automation:
 - post-release SNAPSHOT bump PR
 - prerelease promotion to official release after publish workflow succeeds
 
-### 6) `apollo-release`
+### 6) `apollo-contributor-promotion-review`
+
+Run a quarterly Apollo contributor promotion review across `apolloconfig`:
+
+- scan recent contributor activity across the organization
+- rank the top contributors from the last 100 days
+- backfill historical PR/review/community evidence for the top candidates
+- produce an internal report for member, committer discussion, PMC discussion, or continued observation
+
+### 7) `apollo-release`
 
 Run Apollo server formal release flow with checkpoint-gated automation:
 
@@ -68,7 +78,7 @@ Run Apollo server formal release flow with checkpoint-gated automation:
 - announcement discussion creation
 - post-release SNAPSHOT bump PR with `CHANGES.md` archive and milestone management
 
-### 7) `apollo-helm-chart-release`
+### 8) `apollo-helm-chart-release`
 
 Run Apollo Helm chart release flow for `apolloconfig/apollo-helm-chart` with local automation and publish gates:
 
@@ -78,7 +88,7 @@ Run Apollo Helm chart release flow for `apolloconfig/apollo-helm-chart` with loc
 - create standardized release commit and generate ready-for-review PR draft
 - stop at push/PR gate commands for explicit human confirmation
 
-### 8) `apollo-quick-start-release`
+### 9) `apollo-quick-start-release`
 
 Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
 
@@ -96,8 +106,9 @@ Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
 4. `apollo-release` (for Apollo server release cycles)
 5. `apollo-java-release` (for formal Java SDK release cycles)
 6. `apollo-community-review` (for periodic issue/PR scan, skill routing, and gated auto-send)
-7. `apollo-helm-chart-release` (for apollo-helm-chart packaging/index/PR flow)
-8. `apollo-quick-start-release` (for apollo-quick-start sync PR + docker publish flow)
+7. `apollo-contributor-promotion-review` (for quarterly contributor ranking and promotion readiness review)
+8. `apollo-helm-chart-release` (for apollo-helm-chart packaging/index/PR flow)
+9. `apollo-quick-start-release` (for apollo-quick-start sync PR + docker publish flow)
 
 All publish actions remain confirmation-gated by default.
 
@@ -109,6 +120,7 @@ Use $apollo-issue-to-pr <issue-id>
 Use $apollo-pr-review <pr-id>
 Use $apollo-java-release <release-version>
 Use $apollo-community-review
+Use $apollo-contributor-promotion-review
 Use $apollo-release <release-version>
 Use $apollo-helm-chart-release
 Use $apollo-quick-start-release <release-version>
@@ -121,6 +133,7 @@ apollo-issue-review/
 apollo-issue-to-pr/
 apollo-pr-review/
 apollo-community-review/
+apollo-contributor-promotion-review/
 apollo-release/
 apollo-java-release/
 apollo-helm-chart-release/

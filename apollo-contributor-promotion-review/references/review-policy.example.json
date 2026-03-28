@@ -1,0 +1,26 @@
+{
+  "org": "apolloconfig",
+  "lookbackDays": 100,
+  "topN": 10,
+  "excludeRepos": [
+    "apolloconfig/.github",
+    "apolloconfig/apollo-qa-bot"
+  ],
+  "excludeRepoPrefixes": [
+    "apolloconfig/apollo-ghsa-"
+  ],
+  "maxRepoBonus": 6,
+  "scoreWeights": {
+    "merged_pr": 8,
+    "open_pr": 4,
+    "review": 3,
+    "pr_comment": 1,
+    "issue_comment": 1,
+    "extra_repo_bonus": 2
+  },
+  "thresholds": {
+    "member": 10,
+    "committer_discussion": 24,
+    "pmc_discussion": 30
+  }
+}

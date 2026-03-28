@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apollo Contributor Promotion Review"
+  short_description: "Quarterly Apollo contributor promotion review"
+  default_prompt: "Use $apollo-contributor-promotion-review to scan apolloconfig contributors from the last 100 days, rank the top candidates, and produce an internal promotion review report for member, committer discussion, PMC discussion, or continued observation."
