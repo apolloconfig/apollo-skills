@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -12,6 +14,13 @@ import contributor_promotion_review as cpr
 
 
 class ContributorPromotionReviewTest(unittest.TestCase):
+    def test_is_automation_account_recognizes_service_accounts(self):
+        self.assertTrue(cpr.is_automation_account("copilot-pull-request-reviewer"))
+        self.assertTrue(cpr.is_automation_account("copilot-swe-agent"))
+        self.assertTrue(cpr.is_automation_account("dosubot"))
+        self.assertTrue(cpr.is_automation_account("hound"))
+        self.assertTrue(cpr.is_automation_account("codecov"))
+
     def test_normalize_login_breaks_alias_cycle(self):
         aliases = {"alice": "bob", "bob": "alice"}
 
@@ -363,6 +372,125 @@ class ContributorPromotionReviewTest(unittest.TestCase):
         self.assertEqual(cpr.SECTION_CONTINUE, recommendation["key"])
         self.assertEqual("Observe for member first", recommendation["label"])
         self.assertIn("Not currently recognized as member; observe for member first.", blockers)
+
+    def test_search_issues_returns_empty_for_unsearchable_user(self):
+        error = subprocess.CalledProcessError(
+            1,
+            ["gh", "api"],
+            stderr=(
+                "gh: Validation Failed (HTTP 422)\n"
+                '{"message":"Validation Failed","errors":[{"message":"The listed users cannot be searched either because '
+                'the users do not exist or you do not have permission to view the users.","resource":"Search","field":"q","code":"invalid"}]}'
+            ),
+        )
+
+        with mock.patch.object(cpr, "gh_api_json", side_effect=error):
+            result = cpr.search_issues("org:apolloconfig is:pr author:ghost is:merged", limit=20)
+
+        self.assertEqual({"totalCount": 0, "items": [], "searchUnavailable": True}, result)
+
+    def test_search_issues_waits_and_retries_after_rate_limit(self):
+        error = subprocess.CalledProcessError(
+            1,
+            ["gh", "api"],
+            stderr=(
+                "gh: API rate limit exceeded for user ID 1 (HTTP 403)\n"
+                '{"message":"API rate limit exceeded for user ID 1","status":"403"}'
+            ),
+        )
+
+        with mock.patch.object(
+            cpr,
+            "gh_api_json",
+            side_effect=[error, {"total_count": 1, "items": [{"html_url": "https://example/pr/1"}]}],
+        ), mock.patch.object(cpr, "wait_for_search_rate_limit_reset") as wait_mock:
+            result = cpr.search_issues("org:apolloconfig is:pr author:alice is:merged", limit=20)
+
+        wait_mock.assert_called_once_with()
+        self.assertEqual(1, result["totalCount"])
+        self.assertEqual(1, len(result["items"]))
+
+    def test_build_recommendation_keeps_incomplete_history_conservative(self):
+        contributor = {
+            "login": "ghost",
+            "currentRole": "contributor",
+            "recentScore": 25,
+            "recentRepos": ["apolloconfig/apollo"],
+            "recentBreakdown": {
+                "mergedPrs": 0,
+                "openPrs": 0,
+                "reviews": 0,
+                "prComments": 4,
+                "issueComments": 21,
+                "discussionComments": 0,
+                "repoBonus": 0,
+                "qualifyingActivities": 25,
+                "contributionTypes": 2,
+            },
+            "recentEvidence": [{"url": "https://example/issues/1", "kind": "issue_comment", "label": "Issue comment", "repo": "apolloconfig/apollo", "occurredAt": "2026-03-12T00:00:00Z", "score": 1}],
+            "history": {
+                "authoredPullRequests": 0,
+                "mergedPullRequests": 0,
+                "reviewedPullRequests": 0,
+                "helpedIssues": 0,
+                "discussionComments": 0,
+                "communityHelpInteractions": 0,
+                "activityQuarters": ["2026-Q1"],
+                "activityQuarterCount": 1,
+                "keyEvidence": [],
+                "searchUnavailable": True,
+            },
+        }
+
+        recommendation, blockers = cpr.build_recommendation(
+            contributor,
+            {"member": 10, "committer_discussion": 24, "pmc_discussion": 30},
+        )
+
+        self.assertEqual(cpr.SECTION_CONTINUE, recommendation["key"])
+        self.assertEqual("Continue observing", recommendation["label"])
+        self.assertIn("Historical GitHub search evidence is incomplete for this login.", blockers)
+
+    def test_build_recommendation_requires_merged_pr_for_member(self):
+        contributor = {
+            "login": "open-pr-only",
+            "currentRole": "contributor",
+            "recentScore": 11,
+            "recentRepos": ["apolloconfig/apollo", "apolloconfig/apollo-openapi"],
+            "recentBreakdown": {
+                "mergedPrs": 0,
+                "openPrs": 2,
+                "reviews": 0,
+                "prComments": 0,
+                "issueComments": 1,
+                "discussionComments": 0,
+                "repoBonus": 2,
+                "qualifyingActivities": 3,
+                "contributionTypes": 2,
+            },
+            "recentEvidence": [{"url": "https://example/pr/1", "kind": "open_pr", "label": "Open PR", "repo": "apolloconfig/apollo", "occurredAt": "2026-03-12T00:00:00Z", "score": 4}],
+            "history": {
+                "authoredPullRequests": 2,
+                "mergedPullRequests": 0,
+                "reviewedPullRequests": 0,
+                "helpedIssues": 1,
+                "discussionComments": 0,
+                "communityHelpInteractions": 1,
+                "activityQuarters": ["2026-Q1"],
+                "activityQuarterCount": 1,
+                "keyEvidence": [],
+                "searchUnavailable": False,
+            },
+        }
+
+        recommendation, blockers = cpr.build_recommendation(
+            contributor,
+            {"member": 10, "committer_discussion": 24, "pmc_discussion": 30},
+        )
+
+        self.assertEqual(cpr.SECTION_CONTINUE, recommendation["key"])
+        self.assertEqual("Continue observing", recommendation["label"])
+        self.assertIn("No merged PR evidence yet; wait for landed contributions before recommending member.", blockers)
 
     def test_render_summary_contains_all_sections(self):
         payload = {

@@ -34,13 +34,27 @@ RETRYABLE_GH_ERROR_MARKERS = (
     "http 503",
     "http 504",
 )
+INVALID_SEARCH_USER_MARKERS = (
+    "the listed users cannot be searched",
+    "users do not exist or you do not have permission to view the users",
+)
+SEARCH_RATE_LIMIT_MARKERS = (
+    "api rate limit exceeded",
+    "secondary rate limit",
+)
 KNOWN_AUTOMATION_LOGINS = {
     "copilot",
+    "copilot-pull-request-reviewer",
+    "copilot-swe-agent",
     "coderabbitai",
+    "codecov",
     "dependabot",
     "dependabot[bot]",
+    "dosubot",
+    "dosubot[bot]",
     "github-actions",
     "github-actions[bot]",
+    "hound",
     "mergify",
     "mergify[bot]",
     "renovate",
@@ -255,6 +269,30 @@ def is_human_login(login: str | None, ignored_logins: set[str], aliases: dict[st
 def is_retryable_gh_error(error: subprocess.CalledProcessError) -> bool:
     combined = "\n".join(part for part in [error.stdout or "", error.stderr or ""] if part).lower()
     return any(marker in combined for marker in RETRYABLE_GH_ERROR_MARKERS)
+
+
+def is_invalid_search_user_error(error: subprocess.CalledProcessError) -> bool:
+    combined = "\n".join(part for part in [error.stdout or "", error.stderr or ""] if part).lower()
+    return "validation failed" in combined and all(marker in combined for marker in INVALID_SEARCH_USER_MARKERS)
+
+
+def is_search_rate_limit_error(error: subprocess.CalledProcessError) -> bool:
+    combined = "\n".join(part for part in [error.stdout or "", error.stderr or ""] if part).lower()
+    return "http 403" in combined and any(marker in combined for marker in SEARCH_RATE_LIMIT_MARKERS)
+
+
+def wait_for_search_rate_limit_reset() -> None:
+    payload = gh_api_json("rate_limit")
+    search = payload.get("resources", {}).get("search", {})
+    remaining = search.get("remaining")
+    if remaining:
+        return
+    reset = search.get("reset")
+    if reset is None:
+        time.sleep(1)
+        return
+    delay_seconds = max(1, int(reset - time.time()) + 1)
+    time.sleep(delay_seconds)
 
 
 def run_command(command: list[str]) -> str:
@@ -904,11 +942,19 @@ def search_issues(query: str, *, limit: int = 20) -> dict[str, Any]:
     per_page = min(100, max(limit, 1))
     page = 1
     while len(items) < limit:
-        payload = gh_api_json(
-            "search/issues",
-            params={"q": query, "per_page": per_page, "page": page},
-            method="GET",
-        )
+        try:
+            payload = gh_api_json(
+                "search/issues",
+                params={"q": query, "per_page": per_page, "page": page},
+                method="GET",
+            )
+        except subprocess.CalledProcessError as error:
+            if is_invalid_search_user_error(error):
+                return {"totalCount": 0, "items": [], "searchUnavailable": True}
+            if is_search_rate_limit_error(error):
+                wait_for_search_rate_limit_reset()
+                continue
+            raise
         if page == 1:
             total_count = payload.get("total_count", 0)
         page_items = payload.get("items", [])
@@ -961,6 +1007,7 @@ def enrich_history(
         discussion_evidence = [entry for entry in contributor["recentEvidence"] if entry["kind"] == "discussion_comment"]
 
     community_help_interactions = issue_help["totalCount"] + len(discussion_evidence)
+    search_unavailable = any(bucket.get("searchUnavailable") for bucket in (merged, authored, reviewed, issue_help))
     key_evidence = []
     for item in merged["items"][:2]:
         key_evidence.append(search_item_to_evidence("merged_pr", item))
@@ -980,6 +1027,7 @@ def enrich_history(
         "activityQuarters": sorted(quarter_keys),
         "activityQuarterCount": len(quarter_keys),
         "keyEvidence": select_diverse_evidence(key_evidence, 5),
+        "searchUnavailable": search_unavailable,
     }
 
 
@@ -1015,6 +1063,17 @@ def build_recommendation(contributor: dict[str, Any], thresholds: dict[str, int]
             rationale=["Current role is already PMC."],
             blockers=blockers,
             manual_checks=[],
+        )
+        return recommendation, blockers
+
+    if history.get("searchUnavailable"):
+        blockers.append("Historical GitHub search evidence is incomplete for this login.")
+        recommendation = recommendation_summary(
+            label="Continue observing",
+            key=SECTION_CONTINUE,
+            rationale=["Public GitHub search evidence is incomplete, so automation should not make a promotion recommendation."],
+            blockers=blockers,
+            manual_checks=["Verify the contributor account is valid/searchable and review historical contributions manually."],
         )
         return recommendation, blockers
 
@@ -1099,7 +1158,14 @@ def build_recommendation(contributor: dict[str, Any], thresholds: dict[str, int]
         )
         return recommendation, blockers
 
-    if score >= thresholds["member"] and breakdown["contributionTypes"] >= 2 and breakdown["qualifyingActivities"] >= 3 and contributor["recentEvidence"]:
+    has_merged_pr_evidence = breakdown["mergedPrs"] >= 1 or history.get("mergedPullRequests", 0) >= 1
+    if (
+        score >= thresholds["member"]
+        and breakdown["contributionTypes"] >= 2
+        and breakdown["qualifyingActivities"] >= 3
+        and contributor["recentEvidence"]
+        and has_merged_pr_evidence
+    ):
         recommendation = recommendation_summary(
             label="Member",
             key=SECTION_MEMBERS,
@@ -1121,6 +1187,8 @@ def build_recommendation(contributor: dict[str, Any], thresholds: dict[str, int]
         blockers.append("Recent activity does not cover at least 2 contribution types.")
     if breakdown["qualifyingActivities"] < 3:
         blockers.append("Recent activity does not cover at least 3 qualifying activities.")
+    if not has_merged_pr_evidence:
+        blockers.append("No merged PR evidence yet; wait for landed contributions before recommending member.")
     recommendation = recommendation_summary(
         label="Continue observing",
         key=SECTION_CONTINUE,
