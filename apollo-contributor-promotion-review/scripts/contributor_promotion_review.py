@@ -510,7 +510,7 @@ def parse_team_roles(markdown: str, aliases: dict[str, str] | None = None) -> di
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         if not cells:
             continue
-        if cells[0] in {"GitHub ID", "-----------", "----------- ", "-----------"}:
+        if cells[0] in {"GitHub ID", "-----------", "----------- "}:
             continue
         if set(cells[0]) == {"-"}:
             continue
