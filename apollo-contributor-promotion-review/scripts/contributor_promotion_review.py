@@ -1281,7 +1281,7 @@ def render_group(title: str, contributors: list[dict[str, Any]]) -> list[str]:
 
 
 def render_summary(payload: dict[str, Any]) -> str:
-    top_n = int(payload.get("topN") or len(payload.get("rankedContributors", [])) or 5)
+    top_n = int(payload.get("topN") or len(payload.get("rankedContributors", [])) or 10)
     lines = [
         "# Apollo Contributor Promotion Review",
         "",

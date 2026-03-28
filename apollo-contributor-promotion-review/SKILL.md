@@ -15,7 +15,7 @@ Path notes:
 
 - organization: `apolloconfig`
 - lookback window: `100` days
-- ranking size: top `5`
+- ranking size: top `10`
 - primary data sources:
   - GitHub GraphQL search for recent PRs and issues
   - GitHub REST search for top-candidate historical evidence

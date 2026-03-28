@@ -1,7 +1,7 @@
 {
   "org": "apolloconfig",
   "lookbackDays": 100,
-  "topN": 5,
+  "topN": 10,
   "excludeRepos": [
     "apolloconfig/.github",
     "apolloconfig/apollo-qa-bot"
