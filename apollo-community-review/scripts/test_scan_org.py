@@ -65,7 +65,7 @@ class ScanOrgTest(unittest.TestCase):
         }
         discovered = [
             {"full_name": "apolloconfig/apollo-openapi", "archived": False, "disabled": False, "private": False, "fork": False},
-            {"full_name": "apolloconfig/apollo-java", "archived": False, "disabled": False, "private": True, "fork": False},
+            {"full_name": "apolloconfig/apollo-java", "archived": False, "disabled": False, "private": False, "fork": False},
             {"full_name": "apolloconfig/apollo", "archived": False, "disabled": False, "private": False, "fork": False},
             {"full_name": "apolloconfig/archived-repo", "archived": True, "disabled": False, "private": False, "fork": False},
             {"full_name": "apolloconfig/disabled-repo", "archived": False, "disabled": True, "private": False, "fork": False},
@@ -86,7 +86,7 @@ class ScanOrgTest(unittest.TestCase):
             [
                 {"repo": "apolloconfig/archived-repo", "reason": "archived"},
                 {"repo": "apolloconfig/disabled-repo", "reason": "disabled"},
-                {"repo": "apolloconfig/apollo-ghsa-1234", "reason": "excluded"},
+                {"reason": "excluded"},
             ],
             skipped,
         )
@@ -124,6 +124,27 @@ class ScanOrgTest(unittest.TestCase):
         self.assertEqual("apolloconfig/apollo", payload["byRepo"][0]["repo"])
         self.assertEqual("apolloconfig/apollo-java", payload["errors"][0]["repo"])
         self.assertEqual("boom", payload["errors"][0]["error"])
+
+    def test_public_scan_fails_closed_and_always_excludes_advisory_repos(self):
+        policy = {"org": "apolloconfig", "excludeRepoPrefixes": []}
+        discovered = [
+            {"full_name": "apolloconfig/private-secret", "private": True},
+            {"full_name": "apolloconfig/internal-secret", "private": False, "visibility": "internal"},
+            {"full_name": "apolloconfig/unknown-visibility"},
+            {"full_name": "apolloconfig/anything-ghsa-1234", "private": False},
+            {"full_name": "apolloconfig/public", "private": False},
+        ]
+        plan, skipped = scan_org.build_repo_plan(policy, discovered, actor="alice")
+        self.assertEqual(["apolloconfig/public"], [entry["repo"] for entry in plan])
+        self.assertEqual(4, len(skipped))
+        self.assertNotIn("private-secret", str(skipped))
+        self.assertNotIn("internal-secret", str(skipped))
+        self.assertNotIn("unknown-visibility", str(skipped))
+
+    def test_repository_listing_requests_public_only(self):
+        with patch.object(scan_org, "run_command", return_value="") as run:
+            self.assertEqual([], scan_org.list_org_repositories("apolloconfig"))
+        self.assertIn("orgs/apolloconfig/repos?per_page=100&type=public", run.call_args.args[0])
 
     def test_merge_policy_overlays_operator_repo_maintainers(self):
         base = {

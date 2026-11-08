@@ -26,6 +26,7 @@ COMMUNITY_REVIEW_DECISION
   "decision_confidence": "high",
   "recommended_action": "comment",
   "validation_completed": true,
+  "evidence": ["Synthetic fixture: repository source and focused validation output inspected for this test case"],
   "missing_info_fields": [],
   "blocking": false,
   "blocking_reasons": [],
