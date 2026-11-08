@@ -185,9 +185,15 @@ Do not mark dry runs, ready drafts, errors or uncertain writes as processed. Old
 cannot acknowledge a newer queued signature. Keep manual handoffs in the operator's
 review queue until resolved.
 
+Every confirmed send, including an ordinary successful response, durably saves its
+original result and a recovery flag before returning. If command output is lost, the
+next scan recovers that result and completes only the matching original queued snapshot.
+It does not resend or acknowledge newer work. Recovery and discovery/acknowledgement
+share the same state lock, so another publisher cannot enter between those steps.
+
 7. Summarize once, using actual returned results:
 
-Include durable deletion and recovered-publication outcomes, plus unresolved operations:
+Include durable deletion and confirmed-publication outcomes, plus unresolved operations:
 
 ```bash
 python3 "$SKILL_ROOT/scripts/community_review.py" scan-results \
@@ -195,8 +201,11 @@ python3 "$SKILL_ROOT/scripts/community_review.py" scan-results \
 ```
 
 Merge these result objects with the current run's normal results before summarizing.
+The summary shows each confirmed comment/review URL once, even when both the immediate
+result and durable outbox contain it. Distinct sends, manual handoffs and unresolved
+outcomes remain separate; deduplication never changes the audit trail.
 The timestamp filter applies to recorded completed/deleted results; unresolved writes
-are always included. Omit `--since` to inspect the full retained recovery audit trail.
+are always included. Omit `--since` to inspect the full retained publication audit trail.
 Do not advance the runner's reporting timestamp until its summary is successfully
 delivered. The command is read-only and does not clear recovery records.
 

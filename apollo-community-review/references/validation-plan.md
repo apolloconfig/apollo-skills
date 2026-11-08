@@ -51,6 +51,9 @@ Regression areas:
    commits, equal commit/maintainer timestamps, Draft → Ready transitions, confirmed
    deletion versus ambiguous failures, reverted pending content, original-snapshot
    publication binding, and crash-safe recovery before refresh/acknowledgement.
+8. Lost output after a successful response, failures before/after confirmation persistence,
+   later scan failures, and deduplicated immediate/outbox summaries without hiding distinct
+   sends, manual outcomes, or security holds.
 
 ## Dry run and limited activation
 
@@ -77,15 +80,22 @@ GitHub API behavior, scheduler execution, or the chosen model configuration.
   and review state for request-changes. If no exact result is found, stop and let the operator
   reconcile. Absence in one read is not permission to retry or clear the journal.
 - Keep old state and logs for diagnosis. Do not delete the journal to force a resend.
-- The scanner reconciles unresolved operations before refreshing candidates. A confirmed
-  result and its original snapshot are saved together in an operation-keyed recovery
-  outbox. A durable recovery flag resumes matching-queue completion after interruption;
+- The scanner reconciles unresolved operations before refreshing candidates. Every confirmed
+  result, whether returned by a successful send or found during reconciliation, is saved
+  with its original snapshot, `sent` journal status and recovery flag in one atomic write.
+  The operation-keyed outbox survives lost command output. The recovery flag resumes
+  matching-queue completion after interruption;
   a later operation cannot overwrite the earlier recovered result. If newer work is
   already queued, recovery records the old success without acknowledging that newer work.
+  Recovery and the following discovery or acknowledgement hold one continuous state lock;
+  successful-send recovery is persisted even if later discovery fails.
 - Use `scan-results --state-file <path> --actor <login> --since <last_successful_report_iso>`
-  to include recovery and confirmed-deletion outcomes in the run summary. Unresolved
+  to include confirmed-publication and deletion outcomes in the run summary. Unresolved
   writes are always included, remain held, and cannot be acknowledged as manual/skipped.
   Retain the reporting timestamp until the summary is successfully delivered.
+- Merge immediate and durable results before summarizing. The renderer deduplicates only
+  confirmed sends with the same nonempty comment/review URL. Different URLs, manual
+  handoffs and unresolved operations stay visible; a security-held duplicate stays withheld.
 - A legacy `sent` journal that lacks the original decision cannot certify a caller's
   fresh context. An orphan matching remote marker also cannot reconstruct that context.
   Both require operator reconciliation; neither permits an automatic resend.

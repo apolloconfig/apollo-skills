@@ -1085,8 +1085,21 @@ def render_summary(results: list[dict[str, Any]]) -> str:
         "needs-review": [],
         "skipped/error": [],
     }
+    sent_urls: dict[str, int] = {}
     for result in results:
         group = result.get("result_group", "skipped/error")
+        # The current command and durable outbox can report the same send.
+        # Deduplicate the confirmed publication, not the thread: a thread may
+        # have several distinct comments, handoffs, or unresolved operations.
+        if group == "auto-sent":
+            url = result.get("comment_url")
+            if isinstance(url, str) and url.strip():
+                if url in sent_urls:
+                    # A withheld copy must win regardless of input order.
+                    if any("security-sensitive" in reason for reason in result.get("blocking_reasons", [])):
+                        groups[group][sent_urls[url]] = result
+                    continue
+                sent_urls[url] = len(groups[group])
         if group in {"ready-to-send", "dry-run"}:
             group = "needs-review"
         elif group not in groups:
@@ -1196,42 +1209,53 @@ def post_comment_via_cli(repo: str, number: int, body: str, *, dry_run: bool) ->
     return json.loads(output)
 
 
+def recover_publications_in_state(state: dict[str, Any], state_path: Path, *,
+                                  repo: str | None = None, key: str | None = None) -> set[str]:
+    """Recover under the caller's state lock, before any discovery can refresh it.
+
+    Persist recovery independently of subsequent discovery. Holding this same lock
+    through discovery prevents a successful publisher from entering between them.
+    """
+    from publish_gate import original_publication, reconcile_publications, require_acknowledgeable
+    journal = state.get("publication_journal", {})
+    pending_keys = {k for k, record in journal.items()
+                    if (record.get("status") in {"pending", "uncertain"}
+                        or (record.get("status") == "sent" and record.get("recovery_pending")))
+                    and (key is None or k == key) and (repo is None or k.split("#", 1)[0] == repo)}
+    if not pending_keys:
+        return set()
+    unresolved = reconcile_publications(state, state_path=state_path, key=key, repo=repo)
+    for record_key in pending_keys - unresolved.keys():
+        record = journal[record_key]
+        original = original_publication(record)
+        candidate = original["candidate"]
+        result = {**original, "result_group": "auto-sent", "comment_url": record["url"], "deduplicated": True}
+        require_acknowledgeable(state, result)
+        state.setdefault("publication_results", {}).setdefault(record["operation_id"], {
+            "recorded_at": to_iso(utc_now()), "result": result,
+        })
+        queued = state.get("pending_candidates", {}).get(record_key)
+        if (queued and queued.get("activity_signature") == candidate.get("activity_signature")
+                and queued.get("context_fingerprint") == candidate.get("context_fingerprint")):
+            mark_processed(state, candidate, result)
+            ds.acknowledge_candidate(state, candidate)
+        record["recovery_pending"] = False
+    for record_key in unresolved:
+        # Keep unresolved work visible even if an older version already lost its queue item.
+        original = journal[record_key].get("decision", {})
+        candidate = original.get("candidate")
+        if isinstance(candidate, dict) and candidate.get("repo") and candidate.get("number"):
+            queued = state.setdefault("pending_candidates", {}).setdefault(record_key, dict(candidate))
+            queued["publication_hold"] = True
+    ds.atomic_save(state_path, state)
+    return set(unresolved)
+
+
 def recover_publication_state(state_path: Path, *, repo: str | None = None,
                               key: str | None = None) -> set[str]:
-    """Recover confirmed original sends before discovery can replace their snapshots."""
-    from publish_gate import original_publication, reconcile_publications, require_acknowledgeable
+    """Recover confirmed original sends in a standalone state transaction."""
     with ds.state_transaction(state_path) as state:
-        journal = state.get("publication_journal", {})
-        pending_keys = {k for k, record in journal.items()
-                        if (record.get("status") in {"pending", "uncertain"}
-                            or (record.get("status") == "sent" and record.get("recovery_pending")))
-                        and (key is None or k == key) and (repo is None or k.split("#", 1)[0] == repo)}
-        if not pending_keys:
-            return set()
-        unresolved = reconcile_publications(state, state_path=state_path, key=key, repo=repo)
-        for record_key in pending_keys - unresolved.keys():
-            record = journal[record_key]
-            original = original_publication(record)
-            candidate = original["candidate"]
-            result = {**original, "result_group": "auto-sent", "comment_url": record["url"], "deduplicated": True}
-            require_acknowledgeable(state, result)
-            state.setdefault("publication_results", {}).setdefault(record["operation_id"], {
-                "recorded_at": to_iso(utc_now()), "result": result,
-            })
-            queued = state.get("pending_candidates", {}).get(record_key)
-            if (queued and queued.get("activity_signature") == candidate.get("activity_signature")
-                    and queued.get("context_fingerprint") == candidate.get("context_fingerprint")):
-                mark_processed(state, candidate, result)
-                ds.acknowledge_candidate(state, candidate)
-            record["recovery_pending"] = False
-        for record_key in unresolved:
-            # Keep unresolved work visible even if an older version already lost its queue item.
-            original = journal[record_key].get("decision", {})
-            candidate = original.get("candidate")
-            if isinstance(candidate, dict) and candidate.get("repo") and candidate.get("number"):
-                queued = state.setdefault("pending_candidates", {}).setdefault(record_key, dict(candidate))
-                queued["publication_hold"] = True
-    return set(unresolved)
+        return recover_publications_in_state(state, state_path, repo=repo, key=key)
 
 
 def command_scan(args: argparse.Namespace) -> None:
@@ -1240,16 +1264,8 @@ def command_scan(args: argparse.Namespace) -> None:
     actor = resolve_actor_login(args.actor)
     state_path = resolve_state_path(args.state_file, actor)
     maintainers = resolve_maintainers(args.maintainers, actor) | {actor.lower()}
-    frozen_keys = recover_publication_state(state_path, repo=args.repo)
     with ds.state_transaction(state_path) as state:
-        # A writer could have become uncertain between recovery and this lock.
-        # Freeze that original too; never let discovery acknowledge its result.
-        for key, record in state.get("publication_journal", {}).items():
-            if key.split("#", 1)[0] == args.repo and record.get("status") in {"pending", "uncertain"}:
-                frozen_keys.add(key)
-                original = record.get("decision", {}).get("candidate")
-                if isinstance(original, dict):
-                    state.setdefault("pending_candidates", {}).setdefault(key, dict(original))["publication_hold"] = True
+        frozen_keys = recover_publications_in_state(state, state_path, repo=args.repo)
         started_at = utc_now()
         since = ds.scan_since(state, args.repo, args.initial_lookback_hours, now=started_at)
         candidates = discover_candidates(args.repo, actor_login=actor, maintainers=maintainers,
@@ -1322,9 +1338,9 @@ def command_mark_processed(args: argparse.Namespace) -> None:
             raise ValueError("result does not match the candidate being acknowledged")
     if decision.get("candidate", {}).get("context_fingerprint") != candidate.get("context_fingerprint"):
         raise ValueError("result context does not match the candidate being acknowledged")
-    recover_publication_state(state_path, key=state_key(candidate))
     with ds.state_transaction(state_path) as state:
         from publish_gate import require_acknowledgeable
+        recover_publications_in_state(state, state_path, key=state_key(candidate))
         require_acknowledgeable(state, decision)
         key = state_key(candidate)
         queued = state.get("pending_candidates", {}).get(key)

@@ -156,6 +156,27 @@ def require_acknowledgeable(state: dict[str, Any], decision: dict[str, Any]) -> 
         raise ValueError("auto-sent acknowledgement requires the matching original confirmed publication snapshot in the publication journal")
 
 
+def confirm_publication(state: dict[str, Any], record: dict[str, Any], url: str, *,
+                        state_path: Path, deduplicated: bool = False) -> dict[str, Any]:
+    """Persist confirmation and its original result together while holding the state lock.
+
+    Both a successful response and read-only reconciliation need the same durable
+    outbox and recovery flag: callers can lose stdout after either confirmation.
+    Recovery may acknowledge only the exact original queued snapshot, and a later
+    operation replacing the journal slot must not erase this report.
+    """
+    original = original_publication(record)
+    result = {**original, "result_group": "auto-sent", "comment_url": url}
+    if deduplicated:
+        result["deduplicated"] = True
+    record.update(status="sent", url=url, recovery_pending=True)
+    state.setdefault("publication_results", {}).setdefault(record["operation_id"], {
+        "recorded_at": cr.to_iso(cr.utc_now()), "result": result,
+    })
+    ds.atomic_save(state_path, state)
+    return result
+
+
 def reconcile_publications(state: dict[str, Any], *, state_path: Path,
                            key: str | None = None, repo: str | None = None) -> dict[str, str]:
     """Read remote posts only; caller MUST hold state_transaction's lock.
@@ -184,15 +205,7 @@ def reconcile_publications(state: dict[str, Any], *, state_path: Path,
         except Exception as exc:
             unresolved[record_key] = str(exc)
             continue
-        record.update(status="sent", url=found["html_url"], recovery_pending=True)
-        # Store the report in the same durable write as confirmation. A caller
-        # may subsequently start a different operation and replace this journal
-        # slot, but it must not lose the recovered result for the old operation.
-        state.setdefault("publication_results", {}).setdefault(record["operation_id"], {
-            "recorded_at": cr.to_iso(cr.utc_now()),
-            "result": {**original, "result_group": "auto-sent", "comment_url": found["html_url"], "deduplicated": True},
-        })
-        ds.atomic_save(state_path, state)
+        confirm_publication(state, record, found["html_url"], state_path=state_path, deduplicated=True)
     return unresolved
 
 
@@ -267,5 +280,4 @@ def publish_decision(decision: dict[str, Any], *, state_path: Path, dry_run: boo
             record["status"] = "uncertain"
             ds.atomic_save(state_path, state)
             raise
-        record.update(status="sent", url=url)
-        return {**current, "result_group": "auto-sent", "comment_url": url}
+        return confirm_publication(state, record, url, state_path=state_path)
