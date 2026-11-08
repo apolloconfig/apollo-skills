@@ -21,6 +21,9 @@ changes the active model, grants private advisory access, or publishes a GitHub 
 - All invocations for one actor must use the same durable state file and POSIX lock.
   Multiple hosts need a single publisher or an external shared lock/store, not copies
   of the JSON state. Back up state before upgrading or resetting anything.
+  Symbolic-link aliases resolve to the same canonical state path before locking; all
+  recovery and final writes must use that path. Keep the state directory trusted and
+  stable during a run. Hard-linked copies are not a supported way to share state.
 
 ## Offline checks
 
@@ -54,6 +57,9 @@ Regression areas:
 8. Lost output after a successful response, failures before/after confirmation persistence,
    later scan failures, and deduplicated immediate/outbox summaries without hiding distinct
    sends, manual outcomes, or security holds.
+9. Symbolic-link state paths during scan, acknowledgement, and standalone recovery;
+   successful/uncertain outcomes, failed later discovery, and alias/target lock sharing
+   must preserve one state file without replacing the alias or splitting cursors.
 
 ## Dry run and limited activation
 
@@ -80,6 +86,10 @@ GitHub API behavior, scheduler execution, or the chosen model configuration.
   and review state for request-changes. If no exact result is found, stop and let the operator
   reconcile. Absence in one read is not permission to retry or clear the journal.
 - Keep old state and logs for diagnosis. Do not delete the journal to force a resend.
+- If an older version has already replaced a symbolic-link alias and split the state,
+  stop affected runs and preserve both files. Reconcile their journals and choose one
+  canonical state file before resuming; this fix does not guess how to merge divergent
+  state or clear uncertain writes.
 - The scanner reconciles unresolved operations before refreshing candidates. Every confirmed
   result, whether returned by a successful send or found during reconciliation, is saved
   with its original snapshot, `sent` journal status and recovery flag in one atomic write.

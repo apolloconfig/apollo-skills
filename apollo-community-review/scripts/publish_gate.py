@@ -164,6 +164,7 @@ def confirm_publication(state: dict[str, Any], record: dict[str, Any], url: str,
     outbox and recovery flag: callers can lose stdout after either confirmation.
     Recovery may acknowledge only the exact original queued snapshot, and a later
     operation replacing the journal slot must not erase this report.
+    state_path must be the canonical target selected before acquiring the lock.
     """
     original = original_publication(record)
     result = {**original, "result_group": "auto-sent", "comment_url": url}
@@ -185,6 +186,7 @@ def reconcile_publications(state: dict[str, Any], *, state_path: Path,
     is saved immediately, so unrelated subsequent discovery failure cannot erase
     it. Unresolved records stay pending/uncertain and are returned for actionable
     reporting; no retry or queue acknowledgement is performed here.
+    state_path must be the canonical target selected before acquiring the lock.
     """
     unresolved = {}
     for record_key, record in state.setdefault("publication_journal", {}).items():

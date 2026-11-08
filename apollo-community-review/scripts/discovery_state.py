@@ -50,7 +50,10 @@ def load_state(path: Path) -> dict[str, Any]:
 
 
 def atomic_save(path: Path, state: dict[str, Any]) -> None:
-    """Atomically replace state. Caller must hold state_transaction's lock."""
+    """Atomically replace state. Caller must hold state_transaction's lock.
+
+    Use the canonical target selected before acquiring that lock.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(state, indent=2, sort_keys=True) + "\n"
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -72,7 +75,11 @@ def atomic_save(path: Path, state: dict[str, Any]) -> None:
 
 @contextmanager
 def state_transaction(path: Path) -> Iterator[dict[str, Any]]:
-    """Read current state under a stable sidecar lock; save only on success."""
+    """Read current state under a stable sidecar lock; save only on success.
+
+    Callers making explicit saves inside the transaction must resolve their path
+    before entering and use that same canonical target for every save.
+    """
     path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(path.name + ".lock").open("a+") as lock:

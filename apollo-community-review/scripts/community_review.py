@@ -123,14 +123,15 @@ def resolve_actor_login(actor: str | None) -> str:
 
 
 def resolve_state_path(state_file: str | None, actor: str | None = None) -> Path:
+    """Choose one canonical target before locking, including for explicit saves."""
     if state_file:
-        return Path(state_file).expanduser()
+        return Path(state_file).expanduser().resolve()
     normalized_actor = (actor or "").strip()
     if normalized_actor:
         if not re.fullmatch(r"[A-Za-z0-9_-]+(?:\[bot\])?", normalized_actor):
             raise ValueError("invalid actor for state directory")
-        return DEFAULT_STATE_ROOT / normalized_actor / "state.json"
-    return DEFAULT_STATE_FILE
+        return (DEFAULT_STATE_ROOT / normalized_actor / "state.json").expanduser().resolve()
+    return DEFAULT_STATE_FILE.expanduser().resolve()
 
 
 def resolve_maintainers(raw: str | None, actor: str) -> set[str]:
@@ -157,6 +158,7 @@ def load_state(path: Path) -> dict[str, Any]:
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
+    """Save to the canonical path selected before acquiring the caller's state lock."""
     ds.atomic_save(path, state)
 
 
@@ -1215,6 +1217,8 @@ def recover_publications_in_state(state: dict[str, Any], state_path: Path, *,
 
     Persist recovery independently of subsequent discovery. Holding this same lock
     through discovery prevents a successful publisher from entering between them.
+    state_path must be the canonical target selected before acquiring that lock,
+    not the caller's symlink or a path resolved again after locking.
     """
     from publish_gate import original_publication, reconcile_publications, require_acknowledgeable
     journal = state.get("publication_journal", {})
@@ -1254,6 +1258,7 @@ def recover_publications_in_state(state: dict[str, Any], state_path: Path, *,
 def recover_publication_state(state_path: Path, *, repo: str | None = None,
                               key: str | None = None) -> set[str]:
     """Recover confirmed original sends in a standalone state transaction."""
+    state_path = state_path.expanduser().resolve()
     with ds.state_transaction(state_path) as state:
         return recover_publications_in_state(state, state_path, repo=repo, key=key)
 

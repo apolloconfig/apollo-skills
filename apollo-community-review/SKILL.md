@@ -190,6 +190,9 @@ original result and a recovery flag before returning. If command output is lost,
 next scan recovers that result and completes only the matching original queued snapshot.
 It does not resend or acknowledge newer work. Recovery and discovery/acknowledgement
 share the same state lock, so another publisher cannot enter between those steps.
+State paths, including symbolic-link aliases, are resolved before locking. Recovery
+and the final transaction commit use that same canonical destination; do not move or
+retarget the state directory while a run is active.
 
 7. Summarize once, using actual returned results:
 
