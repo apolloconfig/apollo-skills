@@ -23,6 +23,15 @@ Follow this workflow to review an Apollo issue and produce a concise maintainer 
 - For OpenAPI-related asks, explicitly separate Portal web APIs (e.g., `/users`) and OpenAPI endpoints (e.g., `/openapi/v1/*`); only claim "OpenAPI supports X" when token-based OpenAPI path is verified.
 - Before concluding "capability not available", cross-check code + docs/scripts + module/dependency hints from `pom.xml` to avoid false negatives caused by path assumptions.
 
+## Community review pipeline boundary
+
+When invoked by `apollo-community-review` with `output_mode=pipeline`, produce evidence
+and a draft only. The parent community workflow owns any authorized publication and
+must use its fresh-state gate. Standalone usage keeps all confirmation rules below.
+Approvals always require explicit confirmation for the individual PR and current head;
+a clean check result alone never authorizes an approval. Do not execute untrusted
+contributor code with publishing credentials or private security context available.
+
 ## Input Contract
 
 Collect or derive these fields before review:

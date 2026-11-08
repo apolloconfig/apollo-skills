@@ -43,7 +43,9 @@ Run the scheduled Apollo GitHub community review automation for `apolloconfig/ap
 
 - scan open issues and PRs for new external activity
 - route issues to `apollo-issue-review` and PRs to `apollo-pr-review`
-- apply deterministic high-confidence auto-send policy
+- apply evidence-backed comment/request-changes gates with fresh context and head checks
+- retain durable per-repository discovery queues; propose two daily runs without enabling a schedule
+- keep approvals confirmation-gated and private security work separate
 - batch the run into one inbox summary with `Auto-sent`, `Needs review`, and `Skipped/Error`
 
 ### 5) `apollo-java-release`

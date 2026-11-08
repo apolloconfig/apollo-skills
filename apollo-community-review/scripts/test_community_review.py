@@ -110,7 +110,7 @@ class CommunityReviewTest(unittest.TestCase):
     def test_pr_request_changes_stays_manual(self):
         decision = cr.build_decision(pr_candidate(), fixture("pr_request_changes_zh.txt"))
         self.assertFalse(decision["auto_send_eligible"])
-        self.assertIn("recommended action is request changes", decision["blocking_reasons"])
+        self.assertIn("request changes must be validated against current PR head", decision["blocking_reasons"])
 
     def test_pr_failed_checks_stays_manual(self):
         candidate = pr_candidate(
@@ -146,9 +146,9 @@ class CommunityReviewTest(unittest.TestCase):
             fixture("issue_bug_en_reproduced_high.txt"),
         )
         self.assertFalse(decision["auto_send_eligible"])
-        self.assertIn("security-sensitive thread", decision["blocking_reasons"])
+        self.assertIn("security-sensitive content; keep out of public workflow", decision["blocking_reasons"])
 
-    def test_yaml_fallback_is_supported(self):
+    def test_yaml_fallback_without_specific_evidence_stays_manual(self):
         review_text = """Issue Summary
 
 Draft Maintainer Reply
@@ -173,8 +173,8 @@ handoff:
     risk_hints: []
 """
         decision = cr.build_decision(issue_candidate(), review_text)
-        self.assertTrue(decision["auto_send_eligible"])
-        self.assertIn(cr.CHINESE_DISCLAIMER, decision["prepared_body"])
+        self.assertFalse(decision["auto_send_eligible"])
+        self.assertIn("specific source or validation evidence is required", decision["blocking_reasons"])
 
     def test_dedupe_uses_activity_signature(self):
         candidate = issue_candidate()
@@ -268,7 +268,7 @@ handoff:
 
         self.assertEqual("2026-03-10T00:00:00Z", candidate["latest_external_activity_at"])
         self.assertEqual(
-            "issue:3001:issue-body:3001:2026-03-10T00:00:00Z",
+            f"issue:3001:root:{candidate['root_fingerprint']}:issue-body:3001:2026-03-10T00:00:00Z",
             candidate["activity_signature"],
         )
         self.assertFalse(cr.has_new_external_activity(candidate, "2026-03-15T00:00:00Z"))
@@ -312,7 +312,7 @@ handoff:
         with patch.object(
             cr,
             "gh_api_json",
-            side_effect=[issue, pr, issue_comments, [], [], {"check_runs": []}, {"state": "success"}],
+            side_effect=[issue, pr, issue_comments, [], [], [], {"check_runs": []}, {"state": "success"}],
         ), patch.object(cr, "fetch_commit_timestamp", return_value=("2026-03-10T00:00:00Z", "contributor")):
             candidate = cr.build_pr_candidate(
                 "apolloconfig/apollo",

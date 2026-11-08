@@ -1,4 +1,6 @@
 interface:
   display_name: "Apollo Community Review"
   short_description: "Run the periodic Apollo issue/PR review automation with gated auto-send"
-  default_prompt: "Use $apollo-community-review to scan apolloconfig/apollo for new issue/PR activity, route each thread through the appropriate Apollo review skill in pipeline mode, auto-send only eligible high-confidence comments, and produce one inbox summary with Auto-sent, Needs review, and Skipped/Error."
+  default_prompt: "Use $apollo-community-review to scan apolloconfig/apollo for new issue/PR activity, route each thread through the appropriate Apollo review skill in pipeline mode, prepare evidence-backed comments and supported request-changes, keep publication disabled until activation is confirmed, and produce one inbox summary with Auto-sent, Needs review, and Skipped/Error."
+
+# Actual runner model, timezone and schedule must be verified before activation.

@@ -7,6 +7,15 @@ description: Review pull requests for Apollo ecosystem repositories (apollo, apo
 
 Use this skill to run high-signal PR reviews across Apollo community repos with consistent standards and low back-and-forth.
 
+## Community review pipeline boundary
+
+When invoked by `apollo-community-review` with `output_mode=pipeline`, produce evidence
+and a draft only. The parent community workflow owns any authorized publication and
+must use its fresh-state gate. Standalone usage keeps all confirmation rules below.
+Approvals always require explicit confirmation for the individual PR and current head;
+a clean check result alone never authorizes an approval. Do not execute untrusted
+contributor code with publishing credentials or private security context available.
+
 ## Input Contract
 
 Collect or derive these fields before review:

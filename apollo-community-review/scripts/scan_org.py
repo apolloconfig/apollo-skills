@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--org", default=None, help="Override organization login; defaults to policy org")
     parser.add_argument("--actor", default=None, help="Override actor login; defaults to operator/env/gh auth")
     parser.add_argument("--state-file", type=Path, default=None)
-    parser.add_argument("--initial-lookback-hours", type=int, default=4)
+    parser.add_argument("--initial-lookback-hours", type=int, default=24)
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     return parser.parse_args()
 
@@ -88,7 +88,7 @@ def list_org_repositories(org: str) -> list[dict[str, Any]]:
         "gh",
         "api",
         "--paginate",
-        f"orgs/{org}/repos?per_page=100&type=all",
+        f"orgs/{org}/repos?per_page=100&type=public",
         "--jq",
         ".[] | @json",
     ]
@@ -122,7 +122,15 @@ def build_repo_plan(
         if not full_name.startswith(f"{org}/"):
             continue
         if full_name in exclude_repos or any(full_name.startswith(prefix) for prefix in exclude_prefixes):
-            skipped.append({"repo": full_name, "reason": "excluded"})
+            skipped.append({"reason": "excluded"})
+            continue
+        # Fail closed for missing visibility and never scan advisory forks, even
+        # when operator policy overrides the default exclusion prefix.
+        if repo.get("private") is not False or repo.get("visibility", "public") != "public":
+            skipped.append({"reason": "non-public"})
+            continue
+        if "ghsa-" in full_name.lower() or repo.get("security_advisory"):
+            skipped.append({"repo": full_name, "reason": "security-advisory"})
             continue
         if repo.get("archived"):
             skipped.append({"repo": full_name, "reason": "archived"})
