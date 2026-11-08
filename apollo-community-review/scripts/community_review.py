@@ -282,6 +282,7 @@ def fetch_commit_timestamp(repo: str, pr_number: int) -> tuple[str | None, str |
 
 
 def fetch_check_summary(repo: str, sha: str) -> dict[str, Any]:
+    evidence: dict[str, Any] = {"check_runs": [], "statuses": []}
     try:
         check_pages = gh_api_json(gh_repo_endpoint(repo, f"commits/{sha}/check-runs", {"per_page": 100}), paginate=True)
         status_pages = gh_api_json(gh_repo_endpoint(repo, f"commits/{sha}/status", {"per_page": 100}), paginate=True)
@@ -291,6 +292,25 @@ def fetch_check_summary(repo: str, sha: str) -> dict[str, Any]:
             status_pages = [status_pages]
         if not isinstance(check_pages, list) or not check_pages or not isinstance(status_pages, list) or not status_pages:
             raise ValueError("missing check/status pages")
+        # Keep review-relevant source text, rather than volatile transport metadata.
+        # This flows into both the context fingerprint and the security scan, even
+        # when later completeness validation forces a manual hold.
+        for page in check_pages:
+            if isinstance(page, dict) and isinstance(page.get("check_runs"), list):
+                for run in page["check_runs"]:
+                    if isinstance(run, dict):
+                        output = run.get("output")
+                        evidence["check_runs"].append({
+                            **{key: run.get(key) for key in ("name", "status", "conclusion")},
+                            "output": {key: output.get(key) for key in ("title", "summary", "text")}
+                            if isinstance(output, dict) else output,
+                        })
+        for page in status_pages:
+            if isinstance(page, dict) and isinstance(page.get("statuses"), list):
+                evidence["statuses"].extend(
+                    {key: status.get(key) for key in ("context", "state", "description")}
+                    for status in page["statuses"] if isinstance(status, dict)
+                )
         for pages, field in ((check_pages, "check_runs"), (status_pages, "statuses")):
             if any(not isinstance(page, dict) or not isinstance(page.get(field), list)
                    or type(page.get("total_count")) is not int or page["total_count"] < 0 for page in pages):
@@ -307,14 +327,16 @@ def fetch_check_summary(repo: str, sha: str) -> dict[str, Any]:
         if any(not isinstance(status, dict) or status.get("state") not in allowed_states for status in statuses):
             raise ValueError("individual status state is missing/invalid")
         combined = {"state": "success"}
-        states = {page["state"] for page in status_pages} | {status["state"] for status in statuses}
+        # GitHub reports aggregate pending for a complete, empty legacy-status
+        # response. It is not an actual pending check when check runs exist.
+        states = ({page["state"] for page in status_pages} | {status["state"] for status in statuses}) if statuses else set()
         if states & {"error", "failure"}:
             combined["state"] = "failure"
         elif "pending" in states:
             combined["state"] = "pending"
-        return summarize_check_state(checks, combined)
+        return {**summarize_check_state(checks, combined), "evidence": evidence}
     except (subprocess.CalledProcessError, ValueError, TypeError, KeyError, AttributeError):
-        return {"details": ["checks could not be completely verified"], "has_uncertainty": True, "overall": "unknown"}
+        return {"details": ["checks could not be completely verified"], "has_uncertainty": True, "overall": "unknown", "evidence": evidence}
 
 
 def has_new_external_activity(candidate: dict[str, Any], since: str) -> bool:
@@ -586,11 +608,11 @@ def build_pr_candidate(
         "maintainers": sorted(maintainers | {actor_login.lower()}),
         "activity_time_uncertainty": bool(latest_commit_dt and (
             latest_commit_dt > utc_now() + timedelta(minutes=5)
-            or (latest_maintainer_social and latest_commit_dt > latest_maintainer_social["timestamp"]
+            or (latest_maintainer_social and latest_commit_dt >= latest_maintainer_social["timestamp"]
                 and (social_dt is None or social_dt <= latest_maintainer_social["timestamp"])))),
         "diff_complete": type(pr.get("changed_files")) is int and pr["changed_files"] == len(files) and bool(files) and all(complete_file_patch(item) for item in files),
         "root_fingerprint": root_fingerprint,
-        "activity_signature": f"pr:{number}:root:{root_fingerprint}:{commit_signature}:{social_signature}",
+        "activity_signature": f"pr:{number}:draft:{bool(pr.get('draft'))}:root:{root_fingerprint}:{commit_signature}:{social_signature}",
         "author": pr_author,
         "body": issue.get("body") or pr.get("body") or "",
         "check_summary": check_summary,
@@ -612,6 +634,32 @@ def build_pr_candidate(
     }
 
 
+def is_confirmed_deleted_issue(error: Exception) -> bool:
+    """Recognize gh's explicit HTTP status, not a 404 or arbitrary error body."""
+    return (isinstance(error, subprocess.CalledProcessError)
+            and (error.stderr or "").strip().startswith("gh:")
+            and (error.stderr or "").strip().endswith("(HTTP 410)"))
+
+
+def record_deleted_pending(state: dict[str, Any], candidate: dict[str, Any]) -> None:
+    """Record the terminal read outcome without including deleted thread content."""
+    key = state_key(candidate)
+    state.setdefault("discovery_results", {})[key] = {
+        "repo": candidate["repo"], "thread_type": candidate["thread_type"],
+        "thread_number": candidate["number"], "thread_url": candidate.get("html_url"),
+        "result_group": "skipped", "blocking_reasons": ["pending thread permanently deleted (HTTP 410)"],
+        "recorded_at": to_iso(utc_now()),
+    }
+    state.setdefault("pending_candidates", {}).pop(key, None)
+    state.setdefault("thread_observations", {}).pop(key, None)
+
+
+def discard_reverted_pending(state: dict[str, Any], candidate: dict[str, Any]) -> None:
+    """Discard superseded work only after the current remote signature was read."""
+    if not should_process_candidate(candidate, state):
+        state.setdefault("pending_candidates", {}).pop(state_key(candidate), None)
+
+
 def discover_candidates(
     repo: str,
     *,
@@ -620,6 +668,7 @@ def discover_candidates(
     state: dict[str, Any],
     initial_lookback_hours: int,
     since: str | None = None,
+    frozen_keys: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     since = since or ds.scan_since(state, repo, initial_lookback_hours)
     issues = gh_api_json(
@@ -638,12 +687,26 @@ def discover_candidates(
     )
 
     pending = {item["number"]: item for item in ds.pending_candidates(state, repo)}
+    frozen_keys = frozen_keys or set()
+    frozen_numbers = {item["number"] for item in pending.values() if state_key(item) in frozen_keys}
     returned_numbers = {issue["number"] for issue in issues}
     # Pending work must be refreshed even when its update fell outside discovery overlap.
-    for number in sorted(set(pending) - returned_numbers):
-        issues.append(gh_api_json(gh_repo_endpoint(repo, f"issues/{number}")))
+    for number in sorted(set(pending) - returned_numbers - frozen_numbers):
+        issues.append({"number": number})
     candidates: list[dict[str, Any]] = []
-    for issue in issues:
+    for issue_stub in issues:
+        number = issue_stub["number"]
+        if number in frozen_numbers:
+            continue
+        # Use the same detail representation as publication. This is compatibility
+        # hardening; current GitHub list/detail shapes need not differ.
+        try:
+            issue = gh_api_json(gh_repo_endpoint(repo, f"issues/{number}"))
+        except subprocess.CalledProcessError as error:
+            if number in pending and is_confirmed_deleted_issue(error):
+                record_deleted_pending(state, pending[number])
+                continue
+            raise
         if issue.get("state") != "open" and issue["number"] not in pending:
             continue
         if issue.get("pull_request"):
@@ -663,7 +726,8 @@ def discover_candidates(
         observations = state.setdefault("thread_observations", {})
         key = state_key(candidate)
         prior = observations.get(key)
-        observed = {"root_fingerprint": candidate.get("root_fingerprint"), "head_sha": candidate.get("head_sha")}
+        observed = {"root_fingerprint": candidate.get("root_fingerprint"), "head_sha": candidate.get("head_sha"),
+                    "draft": candidate.get("draft", False)}
         observations[key] = observed
         changed_root_or_head = prior is not None and prior != observed
         if not changed_root_or_head and not has_new_external_activity(candidate, since):
@@ -673,6 +737,8 @@ def discover_candidates(
                     candidate["discovery_uncertainty"] = uncertainty
                 if should_process_candidate(candidate, state):
                     candidates.append(candidate)
+                else:
+                    discard_reverted_pending(state, candidate)
                 continue
             updated_at = iso_to_datetime(candidate.get("updated_at"))
             if prior is None and candidate.get("latest_external_activity_at") and updated_at and updated_at >= iso_to_datetime(since):
@@ -681,6 +747,8 @@ def discover_candidates(
                 continue
         if should_process_candidate(candidate, state):
             candidates.append(candidate)
+        else:
+            discard_reverted_pending(state, candidate)
     return candidates
 
 
@@ -807,6 +875,8 @@ def build_decision(candidate: dict[str, Any], review_text: str) -> dict[str, Any
         blocking_reasons.append("thread is not open")
     if candidate.get("discovery_uncertainty"):
         blocking_reasons.append(candidate["discovery_uncertainty"])
+    if candidate.get("publication_hold"):
+        blocking_reasons.append("publication outcome unresolved; reconcile before reviewing or acknowledging")
     if candidate.get("activity_time_uncertainty"):
         blocking_reasons.append("Git commit timestamps cannot establish newer external activity; manual ordering review required")
     if candidate.get("has_newer_maintainer_activity"):
@@ -1126,20 +1196,90 @@ def post_comment_via_cli(repo: str, number: int, body: str, *, dry_run: bool) ->
     return json.loads(output)
 
 
+def recover_publication_state(state_path: Path, *, repo: str | None = None,
+                              key: str | None = None) -> set[str]:
+    """Recover confirmed original sends before discovery can replace their snapshots."""
+    from publish_gate import original_publication, reconcile_publications, require_acknowledgeable
+    with ds.state_transaction(state_path) as state:
+        journal = state.get("publication_journal", {})
+        pending_keys = {k for k, record in journal.items()
+                        if (record.get("status") in {"pending", "uncertain"}
+                            or (record.get("status") == "sent" and record.get("recovery_pending")))
+                        and (key is None or k == key) and (repo is None or k.split("#", 1)[0] == repo)}
+        if not pending_keys:
+            return set()
+        unresolved = reconcile_publications(state, state_path=state_path, key=key, repo=repo)
+        for record_key in pending_keys - unresolved.keys():
+            record = journal[record_key]
+            original = original_publication(record)
+            candidate = original["candidate"]
+            result = {**original, "result_group": "auto-sent", "comment_url": record["url"], "deduplicated": True}
+            require_acknowledgeable(state, result)
+            state.setdefault("publication_results", {}).setdefault(record["operation_id"], {
+                "recorded_at": to_iso(utc_now()), "result": result,
+            })
+            queued = state.get("pending_candidates", {}).get(record_key)
+            if (queued and queued.get("activity_signature") == candidate.get("activity_signature")
+                    and queued.get("context_fingerprint") == candidate.get("context_fingerprint")):
+                mark_processed(state, candidate, result)
+                ds.acknowledge_candidate(state, candidate)
+            record["recovery_pending"] = False
+        for record_key in unresolved:
+            # Keep unresolved work visible even if an older version already lost its queue item.
+            original = journal[record_key].get("decision", {})
+            candidate = original.get("candidate")
+            if isinstance(candidate, dict) and candidate.get("repo") and candidate.get("number"):
+                queued = state.setdefault("pending_candidates", {}).setdefault(record_key, dict(candidate))
+                queued["publication_hold"] = True
+    return set(unresolved)
+
+
 def command_scan(args: argparse.Namespace) -> None:
     from publish_gate import require_public_repo
     require_public_repo(args.repo)
     actor = resolve_actor_login(args.actor)
     state_path = resolve_state_path(args.state_file, actor)
     maintainers = resolve_maintainers(args.maintainers, actor) | {actor.lower()}
+    frozen_keys = recover_publication_state(state_path, repo=args.repo)
     with ds.state_transaction(state_path) as state:
+        # A writer could have become uncertain between recovery and this lock.
+        # Freeze that original too; never let discovery acknowledge its result.
+        for key, record in state.get("publication_journal", {}).items():
+            if key.split("#", 1)[0] == args.repo and record.get("status") in {"pending", "uncertain"}:
+                frozen_keys.add(key)
+                original = record.get("decision", {}).get("candidate")
+                if isinstance(original, dict):
+                    state.setdefault("pending_candidates", {}).setdefault(key, dict(original))["publication_hold"] = True
         started_at = utc_now()
         since = ds.scan_since(state, args.repo, args.initial_lookback_hours, now=started_at)
         candidates = discover_candidates(args.repo, actor_login=actor, maintainers=maintainers,
-                                        state=state, initial_lookback_hours=args.initial_lookback_hours, since=since)
+                                        state=state, initial_lookback_hours=args.initial_lookback_hours,
+                                        since=since, frozen_keys=frozen_keys)
         ds.commit_discovery(state, args.repo, candidates, started_at=started_at)
         queued = ds.pending_candidates(state, args.repo)
     print(json.dumps(queued, indent=2))
+
+
+def command_scan_results(args: argparse.Namespace) -> None:
+    """Read durable recovery/deletion outcomes without clearing their audit trail."""
+    state = ds.load_state(resolve_state_path(args.state_file, resolve_actor_login(args.actor)))
+    cutoff = iso_to_datetime(args.since) if args.since else None
+    results = []
+    for item in state.get("discovery_results", {}).values():
+        if (not args.repo or item.get("repo") == args.repo) and (not cutoff or iso_to_datetime(item["recorded_at"]) >= cutoff):
+            results.append(item)
+    for item in state.get("publication_results", {}).values():
+        result = item["result"]
+        if (not args.repo or result.get("repo") == args.repo) and (not cutoff or iso_to_datetime(item["recorded_at"]) >= cutoff):
+            results.append(result)
+    for key, record in state.get("publication_journal", {}).items():
+        if record.get("status") not in {"pending", "uncertain"} or (args.repo and key.split("#", 1)[0] != args.repo):
+            continue
+        original = record.get("decision", {})
+        results.append({"repo": original.get("repo"), "thread_type": original.get("thread_type"),
+                        "thread_number": original.get("thread_number"), "thread_url": original.get("thread_url"),
+                        "result_group": "uncertain", "blocking_reasons": ["publication outcome unresolved; operator reconciliation required"]})
+    print(json.dumps(results, indent=2))
 
 
 def command_fetch_thread(args: argparse.Namespace) -> None:
@@ -1182,13 +1322,10 @@ def command_mark_processed(args: argparse.Namespace) -> None:
             raise ValueError("result does not match the candidate being acknowledged")
     if decision.get("candidate", {}).get("context_fingerprint") != candidate.get("context_fingerprint"):
         raise ValueError("result context does not match the candidate being acknowledged")
+    recover_publication_state(state_path, key=state_key(candidate))
     with ds.state_transaction(state_path) as state:
-        if decision["result_group"] == "auto-sent":
-            from publish_gate import operation_id
-            record = state.get("publication_journal", {}).get(state_key(candidate), {})
-            if (record.get("status") != "sent" or record.get("url") != decision["comment_url"]
-                    or record.get("operation_id") != operation_id(decision)):
-                raise ValueError("auto-sent acknowledgement requires the matching confirmed publication journal")
+        from publish_gate import require_acknowledgeable
+        require_acknowledgeable(state, decision)
         key = state_key(candidate)
         queued = state.get("pending_candidates", {}).get(key)
         previous = state.get("threads", {}).get(key, {})
@@ -1243,6 +1380,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--initial-lookback-hours", type=int, default=24)
     scan_parser.add_argument("--state-file")
     scan_parser.set_defaults(func=command_scan)
+
+    result_parser = subparsers.add_parser("scan-results")
+    result_parser.add_argument("--repo")
+    result_parser.add_argument("--actor")
+    result_parser.add_argument("--state-file")
+    result_parser.add_argument("--since", help="Only confirmed/deleted outcomes recorded since this ISO timestamp")
+    result_parser.set_defaults(func=command_scan_results)
 
     fetch_parser = subparsers.add_parser("fetch-thread")
     fetch_parser.add_argument("--repo", default=DEFAULT_REPO)

@@ -64,6 +64,19 @@ changes also trigger work. A first-seen recently updated thread with only older 
 activity is queued for manual review because an edit/push cannot be distinguished from
 automation churn with the REST timestamps alone.
 
+Before refreshing candidates, the scanner reconciles pending/uncertain publication
+records by reading the original remote marker. Confirmed outcomes retain the original
+published snapshot; only an exactly matching queued snapshot can be acknowledged.
+Unresolved operations stay queued with a publication hold, including records whose
+queue entry was lost by an older version. They cannot be acknowledged as a manual
+handoff or skipped item. No automatic resend occurs.
+
+A confirmed `gh` HTTP 410 for a pending issue is recorded as a terminal skipped
+discovery result without stopping other discovery. A 404, authentication failure or
+transient error remains ambiguous and rolls back discovery. Reverting content to an
+already processed signature removes the superseded pending snapshot. A PR's
+Draft → Ready transition is part of its discovery identity and is queued again.
+
 2. Save each complete candidate JSON, then fetch current context:
 
 ```bash
@@ -122,6 +135,11 @@ python3 "$SKILL_ROOT/scripts/community_review.py" decide \
 - High-confidence, validated, blocking P1/P2 `REQUEST_CHANGES` reviews pinned to the
   exact current PR head and supported by the structured evidence above.
 
+Check output title/summary/text and legacy-status descriptions are included in both
+security screening and the context fingerprint. A complete empty legacy-status list
+does not contribute its default `pending` aggregate to passing Check Runs; absent or
+incomplete evidence in both sources still requires manual review.
+
 Never automatically approve, merge, declare merge-ready, release, close, label, change
 permissions or perform other administrative actions. An approval always needs explicit
 confirmation for that PR and current head outside this automatic publisher. Draft PRs,
@@ -149,6 +167,11 @@ response leaves an uncertain result. Reconcile the exact marker, actor and revie
 before reporting success; if it cannot be found, stop for operator reconciliation.
 Never blindly resend and never clear the journal to force a retry.
 
+Cached and reconciled success always returns the original published decision, never a
+new caller snapshot. A legacy journal or orphan remote marker without that snapshot
+requires operator reconciliation. Review age is checked after network reads and again
+immediately before dispatch, without resetting the original review timestamp.
+
 6. Save the returned successful result, not the pre-send decision. Mark only confirmed
    `auto-sent`, deliberate `needs-review` handoffs or intentional `skipped` outcomes:
 
@@ -163,6 +186,19 @@ cannot acknowledge a newer queued signature. Keep manual handoffs in the operato
 review queue until resolved.
 
 7. Summarize once, using actual returned results:
+
+Include durable deletion and recovered-publication outcomes, plus unresolved operations:
+
+```bash
+python3 "$SKILL_ROOT/scripts/community_review.py" scan-results \
+  --actor <github-login> --state-file <state_json> --since <last_successful_report_iso>
+```
+
+Merge these result objects with the current run's normal results before summarizing.
+The timestamp filter applies to recorded completed/deleted results; unresolved writes
+are always included. Omit `--since` to inspect the full retained recovery audit trail.
+Do not advance the runner's reporting timestamp until its summary is successfully
+delivered. The command is read-only and does not clear recovery records.
 
 ```bash
 python3 "$SKILL_ROOT/scripts/community_review.py" summarize --results-file <results_json>

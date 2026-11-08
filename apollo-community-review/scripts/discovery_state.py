@@ -119,6 +119,10 @@ def commit_discovery(state: dict[str, Any], repo: str, candidates: list[dict[str
         key = candidate_key(candidate)
         if state.get("threads", {}).get(key, {}).get("last_processed_signature") != candidate["activity_signature"]:
             queue[key] = candidate
+        else:
+            # The fresh remote snapshot reverted to completed work. An older
+            # different pending snapshot is no longer current and must not linger.
+            queue.pop(key, None)
     cursors = state.setdefault("discovery_cursors", {})
     start = _time(started_at)
     previous = cursors.get(repo)
