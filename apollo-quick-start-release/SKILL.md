@@ -1,6 +1,6 @@
 ---
 name: apollo-quick-start-release
-description: Orchestrate Apollo quick-start release updates with checkpoint-gated GitHub workflow triggers and resume support. Use when Apollo server publishes a new version and you need to trigger quick-start asset sync PR creation, wait for PR merge, then trigger docker-publish with controlled tag input.
+description: Orchestrate Apollo quick-start release updates with checkpoint-gated GitHub workflow triggers and resume support. Use when Apollo server publishes a new version and you need to trigger quick-start asset sync PR creation, wait for PR merge, then publish the versioned ZIP and Docker image.
 ---
 
 # Apollo Quick Start Release
@@ -8,7 +8,7 @@ description: Orchestrate Apollo quick-start release updates with checkpoint-gate
 Run this skill when an Apollo release is finished and you want to drive `apolloconfig/apollo-quick-start` release follow-up in two human-gated phases:
 
 1. Trigger quick-start asset sync workflow to create/update the release PR.
-2. After PR merge, trigger docker publish workflow with the target tag.
+2. After PR merge, publish the ZIP, checksum and Docker image for the same release version.
 
 ## Workflow Contract
 
@@ -32,7 +32,7 @@ python3 scripts/release_flow.py run \
 ### Options
 
 - `--docker-tag`
-  - Docker workflow input `tag`.
+  - Optional Docker alias passed as `tag`. The workflow also receives the explicit Apollo release version.
   - Default: same as `--release-version`.
 - `--state-file`
   - Resume state file path relative to current repository root.
@@ -65,9 +65,9 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 - If no PR exists (no-change sync), allow proceeding directly.
 
 4. Docker checkpoint:
-- Trigger `.github/workflows/docker-publish.yml` on `master` with `tag=<docker_tag>`.
+- Trigger `.github/workflows/docker-publish.yml` on `master` with `release_version=<release_version>` and `tag=<docker_tag>`. The workflow stages the ZIP, builds both image architectures from the verified archive, then publishes the GitHub Release.
 - Wait for workflow completion.
-- Output final report with run URLs, PR metadata, and current pending checkpoint.
+- Output final report with the release URL, image reference, run URLs, PR metadata, and current pending checkpoint.
 
 ## Scripts
 
@@ -82,3 +82,7 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 - Prefer `--dry-run` first to verify checkpoints and state progression.
 - Keep publish actions checkpoint-gated; never bypass confirmations.
 - Reuse the same release version state file for resume instead of restarting with a different version.
+
+### First ZIP for the existing v3.0.0 tag
+
+The original Quick Start tag predates the VERSION file and already has a published Docker image. Prepare its ZIP from the migration checkout with `python3 scripts/package_release.py --version 3.0.0 --jar <original-jar> --output dist`. Verify that the JAR SHA-256 matches the OID in `git show v3.0.0:apollo-all-in-one.jar`. After explicit publication approval, attach the verified ZIP and its checksum to a GitHub Release on the existing tag using `gh release create v3.0.0 --verify-tag` with both files. This bootstrap reuses the published 3.0.0 image.

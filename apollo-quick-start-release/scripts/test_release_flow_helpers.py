@@ -42,6 +42,41 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
                 flow = ReleaseFlow(args)
         self.assertEqual(flow.state["docker_tag"], "2.5.0")
 
+    def test_distribution_dispatch_uses_release_version_and_checks_assets(self) -> None:
+        version = "3.1.0"
+        archive = f"apollo-quick-start-{version}.zip"
+        details = {"isDraft": False, "url": "https://example.test/release",
+                   "assets": [{"name": name, "state": "uploaded"} for name in (archive, archive + ".sha256")]}
+        with tempfile.TemporaryDirectory() as work, mock.patch("pathlib.Path.cwd", return_value=Path(work)):
+            args = release_flow.parse_args(["run", "--release-version", version, "--docker-tag", "latest",
+                                            "--confirm-checkpoint", "TRIGGER_DOCKER_WORKFLOW"])
+            flow = ReleaseFlow(args)
+            flow.state["steps"]["docker_workflow_completed"] = True
+            with mock.patch.object(flow, "_wait_for_new_run", return_value={"databaseId": 42, "url": "run"}), \
+                 mock.patch.object(flow, "_run_command") as command:
+                command.return_value.stdout = json.dumps({**details, "isDraft": True})
+                with self.assertRaises(release_flow.ReleaseFlowError):
+                    flow._trigger_docker_workflow()
+                self.assertFalse(flow._step_done("distribution_workflow_completed"))
+                dispatch = command.call_args_list[0].args[0]
+                self.assertIn("release_version=3.1.0", dispatch)
+                self.assertIn("tag=latest", dispatch)
+                command.return_value.stdout = json.dumps(details)
+                flow._trigger_docker_workflow()
+                self.assertTrue(flow._step_done("distribution_workflow_completed"))
+                self.assertEqual(flow.state["release_url"], details["url"])
+
+    def test_dry_run_preserves_saved_publication_state(self) -> None:
+        with tempfile.TemporaryDirectory() as work, mock.patch("pathlib.Path.cwd", return_value=Path(work)):
+            state = Path(work) / "state.json"
+            original = '{"release_version":"3.1.0","steps":{}}'
+            state.write_text(original)
+            args = release_flow.parse_args(["run", "--release-version", "3.1.0", "--state-file",
+                                            state.name, "--dry-run"])
+            flow = ReleaseFlow(args)
+            flow._trigger_docker_workflow()
+            self.assertEqual(state.read_text(), original)
+
     def test_checkpoint_persistence_and_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)

@@ -117,8 +117,10 @@ class ReleaseFlow:
             )
 
         resolved_docker_tag = provided_docker_tag or existing_docker_tag or self.args.release_version
-        if not resolved_docker_tag:
-            raise ReleaseFlowError("docker tag cannot be empty")
+        if not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}", resolved_docker_tag):
+            raise ReleaseFlowError("Invalid Docker image tag")
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", resolved_docker_tag) and resolved_docker_tag != self.args.release_version:
+            raise ReleaseFlowError("A versioned image tag must match --release-version")
 
         self.state["release_version"] = self.args.release_version
         self.state["docker_tag"] = resolved_docker_tag
@@ -141,6 +143,8 @@ class ReleaseFlow:
         }
 
     def _save_state(self) -> None:
+        if self.args.dry_run:
+            return
         content = json.dumps(self.state, indent=2, ensure_ascii=True, sort_keys=True) + "\n"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -506,17 +510,17 @@ class ReleaseFlow:
         return payload
 
     def _trigger_docker_workflow(self) -> None:
-        if self._step_done("docker_workflow_completed"):
+        if self._step_done("distribution_workflow_completed"):
             return
 
         self._checkpoint(
             "TRIGGER_DOCKER_WORKFLOW",
-            "Trigger docker-publish.yml to publish quick-start Docker image.",
+            "Publish the versioned Quick Start ZIP, checksum and Docker image.",
         )
 
         if self.args.dry_run:
             self._mark_step_done(
-                "docker_workflow_completed",
+                "distribution_workflow_completed",
                 {
                     "docker_workflow_run_id": 0,
                     "docker_workflow_url": "https://example.invalid/docker-workflow",
@@ -536,6 +540,8 @@ class ReleaseFlow:
                 UPSTREAM_REPO,
                 "--ref",
                 "master",
+                "-f",
+                f"release_version={self.args.release_version}",
                 "-f",
                 f"tag={docker_tag}",
             ],
@@ -559,9 +565,21 @@ class ReleaseFlow:
             timeout_seconds=self.args.watch_timeout_seconds,
         )
 
+        version = self.args.release_version
+        release = self._run_command(
+            ["gh", "release", "view", f"v{version}", "--repo", UPSTREAM_REPO,
+             "--json", "isDraft,assets,url"], check=True,
+        )
+        details = json.loads(release.stdout)
+        archive = f"apollo-quick-start-{version}.zip"
+        published = {asset["name"] for asset in details["assets"] if asset["state"] == "uploaded"}
+        if details["isDraft"] or not {archive, archive + ".sha256"}.issubset(published):
+            raise ReleaseFlowError(f"Release v{version} is missing its published ZIP or checksum")
+
         self._mark_step_done(
-            "docker_workflow_completed",
+            "distribution_workflow_completed",
             {
+                "release_url": details["url"],
                 "docker_workflow_run_id": run_id,
                 "docker_workflow_url": run.get("url"),
             },
@@ -619,6 +637,8 @@ class ReleaseFlow:
             "sync_pr_state": self.state.get("sync_pr_state"),
             "sync_pr_merged": self.state.get("sync_pr_merged"),
             "docker_workflow_url": self.state.get("docker_workflow_url"),
+            "release_url": self.state.get("release_url"),
+            "image": f"nobodyiam/apollo-quick-start:{self.args.release_version}",
             "pending_checkpoint": self.state.get("pending_checkpoint"),
         }
         print(json.dumps(report, indent=2, ensure_ascii=True))
