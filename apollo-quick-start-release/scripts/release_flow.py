@@ -509,61 +509,48 @@ class ReleaseFlow:
             raise ReleaseFlowError(f"Unexpected PR list payload: {payload}")
         return payload
 
-    def _trigger_docker_workflow(self) -> None:
-        if self._step_done("distribution_workflow_completed"):
-            return
-
+    def _dispatch_distribution(self) -> None:
         self._checkpoint(
             "TRIGGER_DOCKER_WORKFLOW",
             "Publish the versioned Quick Start ZIP, checksum and Docker image.",
         )
-
         if self.args.dry_run:
-            self._mark_step_done(
-                "distribution_workflow_completed",
-                {
-                    "docker_workflow_run_id": 0,
-                    "docker_workflow_url": "https://example.invalid/docker-workflow",
-                },
-            )
+            self._mark_step_done("distribution_dispatched", {
+                "docker_workflow_run_id": 0,
+                "docker_workflow_url": "https://example.invalid/docker-workflow",
+            })
             return
 
-        started_at = datetime.now(timezone.utc)
-        docker_tag = self.state["docker_tag"]
-        self._run_command(
-            [
-                "gh",
-                "workflow",
-                "run",
-                DOCKER_WORKFLOW,
-                "--repo",
-                UPSTREAM_REPO,
-                "--ref",
-                "master",
-                "-f",
-                f"release_version={self.args.release_version}",
-                "-f",
-                f"tag={docker_tag}",
-            ],
+        # The dispatch response identifies this run even if another maintainer dispatches concurrently.
+        response = self._run_command(
+            ["gh", "api", "--method", "POST", "-H", "X-GitHub-Api-Version: 2026-03-10",
+             f"repos/{UPSTREAM_REPO}/actions/workflows/{DOCKER_WORKFLOW}/dispatches",
+             "-f", "ref=master", "-f", f"inputs[release_version]={self.args.release_version}",
+             "-f", f"inputs[tag]={self.state['docker_tag']}"],
             mutate=True,
-            check=True,
         )
+        run = json.loads(response.stdout)
+        self._mark_step_done("distribution_dispatched", {
+            "docker_workflow_run_id": run["workflow_run_id"],
+            "docker_workflow_url": run["html_url"],
+        })
 
-        run = self._wait_for_new_run(DOCKER_WORKFLOW, started_at)
-        run_id = int(run["databaseId"])
-        self._run_command(
-            [
-                "gh",
-                "run",
-                "watch",
-                str(run_id),
-                "--repo",
-                UPSTREAM_REPO,
-                "--exit-status",
-            ],
-            check=True,
-            timeout_seconds=self.args.watch_timeout_seconds,
-        )
+    def _trigger_docker_workflow(self) -> None:
+        if self._step_done("distribution_workflow_completed"):
+            return
+        if not self._step_done("distribution_dispatched"):
+            self._dispatch_distribution()
+        if self.args.dry_run:
+            self._mark_step_done("distribution_workflow_completed")
+            return
+
+        if not self._step_done("distribution_run_succeeded"):
+            self._run_command(
+                ["gh", "run", "watch", str(self.state["docker_workflow_run_id"]),
+                 "--repo", UPSTREAM_REPO, "--exit-status"],
+                timeout_seconds=self.args.watch_timeout_seconds,
+            )
+            self._mark_step_done("distribution_run_succeeded")
 
         version = self.args.release_version
         release = self._run_command(
@@ -578,11 +565,7 @@ class ReleaseFlow:
 
         self._mark_step_done(
             "distribution_workflow_completed",
-            {
-                "release_url": details["url"],
-                "docker_workflow_run_id": run_id,
-                "docker_workflow_url": run.get("url"),
-            },
+            {"release_url": details["url"]},
         )
         self._mark_timestamp("docker_workflow_completed_at")
 

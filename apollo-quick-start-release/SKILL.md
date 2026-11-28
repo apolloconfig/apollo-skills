@@ -66,7 +66,8 @@ If execution stops at a checkpoint, rerun with `--confirm-checkpoint <NAME>`.
 
 4. Docker checkpoint:
 - Trigger `.github/workflows/docker-publish.yml` on `master` with `release_version=<release_version>` and `tag=<docker_tag>`. The workflow stages the ZIP, builds both image architectures from the verified archive, then publishes the GitHub Release.
-- Wait for workflow completion.
+- The helper saves the dispatched run ID, watches that run and records its success before checking the public ZIP and checksum. Resume with the same state file after a timeout. If the run failed, inspect it and rerun the failed jobs on that run before resuming.
+- A custom alias updates the version tag and that alias. Only a current release can also update `latest`.
 - Output final report with the release URL, image reference, run URLs, PR metadata, and current pending checkpoint.
 
 ## Scripts
