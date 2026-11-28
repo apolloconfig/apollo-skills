@@ -96,8 +96,8 @@ Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
 
 - trigger quick-start asset sync workflow (`sync-apollo-release.yml`) for release version updates
 - wait for sync workflow completion and inspect fixed-branch PR status (`codex/quick-start-sync-<version>`)
-- require PR merge confirmation before docker publish when sync changes exist
-- trigger docker publish workflow (`docker-publish.yml`) with configurable tag (default: release version)
+- require PR merge confirmation before ZIP and image publication when sync changes exist
+- publish the ZIP and image with `docker-publish.yml` using an explicit release version and optional Docker alias
 - support resume via state file and explicit checkpoint confirmations
 
 ## Recommended Flow
@@ -110,7 +110,7 @@ Run Apollo quick-start release follow-up flow with checkpoint-gated automation:
 6. `apollo-community-review` (for periodic issue/PR scan, skill routing, and gated auto-send)
 7. `apollo-contributor-promotion-review` (for quarterly contributor ranking and promotion readiness review)
 8. `apollo-helm-chart-release` (for apollo-helm-chart packaging/index/PR flow)
-9. `apollo-quick-start-release` (for apollo-quick-start sync PR + docker publish flow)
+9. `apollo-quick-start-release` (for apollo-quick-start sync PR + ZIP and Docker publication)
 
 All publish actions remain confirmation-gated by default.
 

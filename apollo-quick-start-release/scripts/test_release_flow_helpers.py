@@ -42,6 +42,58 @@ class ReleaseFlowHelpersTest(unittest.TestCase):
                 flow = ReleaseFlow(args)
         self.assertEqual(flow.state["docker_tag"], "2.5.0")
 
+    def test_publication_resumes_from_disk_without_a_second_dispatch(self) -> None:
+        version = "3.1.0"
+        archive = f"apollo-quick-start-{version}.zip"
+        args = release_flow.parse_args(["run", "--release-version", version, "--docker-tag", "archive",
+                                        "--state-file", "state.json", "--confirm-checkpoint", "TRIGGER_DOCKER_WORKFLOW"])
+        dispatch = release_flow.CommandResult(json.dumps({"workflow_run_id": 42, "html_url": "run/42"}), "", 0)
+        ok = release_flow.CommandResult("", "", 0)
+        details = {"isDraft": False, "url": "release/3.1.0",
+                   "assets": [{"name": name, "state": "uploaded"} for name in (archive, archive + ".sha256")]}
+
+        with tempfile.TemporaryDirectory() as work, mock.patch("pathlib.Path.cwd", return_value=Path(work)):
+            # A pre-ZIP run ID belongs to the old Docker-only flow.
+            state = Path(work, "state.json")
+            state.write_text(json.dumps({"steps": {"docker_workflow_completed": True}, "docker_workflow_run_id": 17}))
+            responses = [dispatch, release_flow.ReleaseFlowError("watch timeout"), ok,
+                         release_flow.ReleaseFlowError("release view timeout"),
+                         release_flow.CommandResult(json.dumps({**details, "isDraft": True}), "", 0),
+                         release_flow.CommandResult(json.dumps({**details, "assets": details["assets"][:1]}), "", 0),
+                         release_flow.CommandResult(json.dumps(details), "", 0)]
+            with mock.patch.object(ReleaseFlow, "_run_command", side_effect=responses) as command:
+                with self.assertRaisesRegex(release_flow.ReleaseFlowError, "watch timeout"):
+                    ReleaseFlow(args)._trigger_docker_workflow()
+                self.assertEqual(json.loads(state.read_text())["docker_workflow_run_id"], 42)
+                args.confirm_checkpoint = None
+                with self.assertRaisesRegex(release_flow.ReleaseFlowError, "release view timeout"):
+                    ReleaseFlow(args)._trigger_docker_workflow()
+                self.assertTrue(json.loads(state.read_text())["steps"]["distribution_run_succeeded"])
+                for _ in range(2):
+                    with self.assertRaisesRegex(release_flow.ReleaseFlowError, "missing its published ZIP or checksum"):
+                        ReleaseFlow(args)._trigger_docker_workflow()
+                    self.assertFalse(ReleaseFlow(args)._step_done("distribution_workflow_completed"))
+                ReleaseFlow(args)._trigger_docker_workflow()
+                ReleaseFlow(args)._trigger_docker_workflow()
+                calls = [call.args[0] for call in command.call_args_list]
+                self.assertEqual([cmd[1:3] for cmd in calls],
+                                 [["api", "--method"], ["run", "watch"], ["run", "watch"]] + [["release", "view"]] * 4)
+                self.assertIn("inputs[release_version]=3.1.0", calls[0])
+                self.assertIn("inputs[tag]=archive", calls[0])
+                self.assertEqual([cmd[3] for cmd in calls[1:3]], ["42", "42"])
+                self.assertEqual(json.loads(state.read_text())["release_url"], details["url"])
+
+    def test_dry_run_preserves_saved_publication_state(self) -> None:
+        with tempfile.TemporaryDirectory() as work, mock.patch("pathlib.Path.cwd", return_value=Path(work)):
+            state = Path(work) / "state.json"
+            original = '{"release_version":"3.1.0","steps":{}}'
+            state.write_text(original)
+            args = release_flow.parse_args(["run", "--release-version", "3.1.0", "--state-file",
+                                            state.name, "--dry-run"])
+            flow = ReleaseFlow(args)
+            flow._trigger_docker_workflow()
+            self.assertEqual(state.read_text(), original)
+
     def test_checkpoint_persistence_and_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
